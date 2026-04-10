@@ -1,0 +1,85 @@
+services:
+  # ─── PostgreSQL Database ───
+  postgres:
+    image: postgres:16-alpine
+    container_name: lce-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: edtronaut
+      POSTGRES_PASSWORD: edtronaut_secret
+      POSTGRES_DB: live_code_execution
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U edtronaut -d live_code_execution']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── Redis (Queue + Rate Limiting) ───
+  redis:
+    image: redis:7-alpine
+    container_name: lce-redis
+    restart: unless-stopped
+    command: redis-server --requirepass redis_secret --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', 'redis_secret', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── API Server ───
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lce-api
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://edtronaut:edtronaut_secret@postgres:5432/live_code_execution?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "npx prisma migrate deploy && node scripts/seed.js && node dist/server.js"
+
+  # ─── Worker (Code Execution Processor) ───
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lce-worker
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://edtronaut:edtronaut_secret@postgres:5432/live_code_execution?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_secret
+      QUEUE_CONCURRENCY: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["node", "dist/workers/executionWorker.js"]
+
+volumes:
+  pgdata:
+  redisdata:

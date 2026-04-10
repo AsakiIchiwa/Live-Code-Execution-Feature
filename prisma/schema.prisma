@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Reference Table: Supported Languages ───
+model SupportedLanguage {
+  id            Int       @id @default(autoincrement())
+  name          String    @unique @db.VarChar(20)
+  version       String    @db.VarChar(20)
+  dockerImage   String    @map("docker_image") @db.VarChar(100)
+  fileExtension String    @map("file_extension") @db.VarChar(10)
+  maxTimeoutMs  Int       @default(10000) @map("max_timeout_ms")
+  maxMemoryKb   Int       @default(262144) @map("max_memory_kb")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  
+  sessions   CodeSession[]
+  executions Execution[]
+
+  @@map("supported_languages")
+}
+
+// ─── Core: Code Sessions ───
+enum SessionStatus {
+  ACTIVE
+  PAUSED
+  CLOSED
+  EXPIRED
+}
+
+model CodeSession {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  simulationId  String        @map("simulation_id") @db.Uuid
+  userId        String        @map("user_id") @db.Uuid
+  languageId    Int           @map("language_id")
+  templateCode  String        @default("") @map("template_code") @db.Text
+  sourceCode    String        @default("") @map("source_code") @db.Text
+  status        SessionStatus @default(ACTIVE)
+  version       Int           @default(1)
+  expiresAt     DateTime?     @map("expires_at") @db.Timestamptz
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  language  SupportedLanguage @relation(fields: [languageId], references: [id])
+  snapshots CodeSnapshot[]
+  executions Execution[]
+
+  @@index([userId, status], name: "idx_session_user")
+  @@index([simulationId], name: "idx_session_simulation")
+  @@map("code_sessions")
+}
+
+// ─── Core: Code Snapshots (Autosave History) ───
+model CodeSnapshot {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId  String   @map("session_id") @db.Uuid
+  sourceCode String   @map("source_code") @db.Text
+  version    Int
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  session    CodeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  executions Execution[]
+
+  @@unique([sessionId, version])
+  @@index([sessionId, version(sort: Desc)], name: "idx_snapshot_session")
+  @@map("code_snapshots")
+}
+
+// ─── Core: Executions ───
+enum ExecutionStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  TIMEOUT
+  CANCELLED
+}
+
+model Execution {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId       String          @map("session_id") @db.Uuid
+  snapshotId      String          @map("snapshot_id") @db.Uuid
+  languageId      Int             @map("language_id")
+  status          ExecutionStatus @default(QUEUED)
+  idempotencyKey  String          @unique @map("idempotency_key") @db.VarChar(64)
+  stdout          String          @default("") @db.Text
+  stderr          String          @default("") @db.Text
+  exitCode        Int?            @map("exit_code")
+  executionTimeMs Int?            @map("execution_time_ms")
+  memoryUsedKb    Int?            @map("memory_used_kb")
+  retryCount      Int             @default(0) @map("retry_count")
+  maxRetries      Int             @default(2) @map("max_retries")
+  workerId        String?         @map("worker_id") @db.VarChar(50)
+  queuedAt        DateTime        @default(now()) @map("queued_at") @db.Timestamptz
+  startedAt       DateTime?       @map("started_at") @db.Timestamptz
+  completedAt     DateTime?       @map("completed_at") @db.Timestamptz
+
+  session  CodeSession       @relation(fields: [sessionId], references: [id])
+  snapshot CodeSnapshot      @relation(fields: [snapshotId], references: [id])
+  language SupportedLanguage @relation(fields: [languageId], references: [id])
+  logs     ExecutionLog[]
+
+  @@index([sessionId], name: "idx_exec_session")
+  @@index([status, queuedAt], name: "idx_exec_status")
+  @@map("executions")
+}
+
+// ─── Observability: Execution Logs ───
+model ExecutionLog {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  executionId String          @map("execution_id") @db.Uuid
+  fromStatus  ExecutionStatus? @map("from_status")
+  toStatus    ExecutionStatus @map("to_status")
+  workerId    String?         @map("worker_id") @db.VarChar(50)
+  metadata    Json            @default("{}") @db.JsonB
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  execution Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, createdAt], name: "idx_log_execution")
+  @@map("execution_logs")
+}
