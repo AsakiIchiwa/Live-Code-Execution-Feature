@@ -57,7 +57,7 @@ services:
       redis:
         condition: service_healthy
     command: >
-      sh -c "npx prisma migrate deploy && node scripts/seed.js && node dist/server.js"
+      sh -c "npx prisma migrate deploy && npx prisma db seed && node dist/server.js"
 
   # ─── Worker (Code Execution Processor) ───
   worker:
