@@ -57,13 +57,16 @@ live-code-execution/
 │   ├── workers/
 │   │   └── executionWorker.ts # BullMQ consumer (processes code jobs)
 │   └── server.ts              # Fastify app bootstrap + plugin registration
+├── scripts/
+│   └── start-all.sh           # Combined API + Worker startup script (for single-container deploy)
 ├── tests/
 │   ├── unit/                  # 29 unit tests (schemas, helpers)
 │   └── integration/           # 21 integration tests (API + execution flow)
 ├── docker-compose.yml         # One-command infrastructure
-├── Dockerfile                 # Multi-stage build
+├── Dockerfile                 # Multi-stage build (Debian slim)
 ├── package.json
 ├── tsconfig.json
+├── prisma/tsconfig.json       # Prisma-specific TypeScript config
 ├── vitest.config.ts
 └── .env.example
 ```
@@ -446,12 +449,22 @@ supported_languages (1) <---- (N) code_sessions (1) <---- (N) code_snapshots
 
 ### `Dockerfile`
 
-Multi-stage build:
-1. **Builder stage:** Install deps -> generate Prisma -> compile TypeScript
-2. **Production stage:** Copy only `dist/` + `node_modules/` + `prisma/`
+Multi-stage build using `node:20-slim` (Debian-based) for OpenSSL 3.x compatibility with Prisma:
+1. **Builder stage:** Install `openssl` + deps -> generate Prisma -> compile TypeScript
+2. **Production stage:** Copy only `dist/` + `node_modules/` + `prisma/` + `scripts/`
    - `tini` as PID 1 -- handles signals properly, reaps zombie processes
    - Non-root user `appuser` (uid 1001)
    - Python3 installed for sandbox execution
+   - `openssl` + `ca-certificates` for Prisma engine compatibility
+
+### `scripts/start-all.sh`
+
+Combined startup script for running API server + Worker in a single container (cost-effective for free-tier deployment):
+1. Runs `prisma migrate deploy` (database migrations)
+2. Seeds supported languages via inline Node.js script (idempotent upsert)
+3. Starts API server (`node dist/server.js`) in background
+4. Starts Worker (`node dist/workers/executionWorker.js`) in background
+5. Handles graceful shutdown via SIGTERM/SIGINT trap
 
 ### `docker-compose.yml`
 
