@@ -5,9 +5,14 @@
 echo "Running database migrations..."
 npx prisma migrate deploy
 
-echo "Seeding database..."
-npx tsx prisma/seed.ts
-echo "Database seeded."
+# Only seed if RUN_SEED=true (set this on first deploy only, then remove it)
+if [ "$RUN_SEED" = "true" ]; then
+  echo "Seeding database..."
+  npx tsx prisma/seed.ts
+  echo "Database seeded."
+else
+  echo "Skipping seed (set RUN_SEED=true to seed)"
+fi
 
 echo "Starting API server..."
 node dist/server.js &
@@ -28,7 +33,11 @@ shutdown() {
   exit 0
 }
 
-trap shutdown SIGTERM SIGINT
+trap shutdown SIGTERM SIGINT SIGHUP
 
-# Wait for both processes
-wait $API_PID $WORKER_PID
+# Wait for any process to exit
+wait -n $API_PID $WORKER_PID 2>/dev/null || wait $API_PID
+EXIT_CODE=$?
+
+echo "Process exited with code $EXIT_CODE, shutting down..."
+shutdown
