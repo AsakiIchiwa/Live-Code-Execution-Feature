@@ -28,6 +28,7 @@
     "@fastify/swagger": "^8.15.0",
     "@fastify/swagger-ui": "^4.1.0",
     "@prisma/client": "^5.20.0",
+    "prisma": "^5.20.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.12.0",
     "dotenv": "^16.4.5",
@@ -43,7 +44,6 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.5.0",
-    "prisma": "^5.20.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"

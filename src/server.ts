@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import crypto from 'crypto';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
@@ -101,6 +102,16 @@ async function buildApp() {
 
 async function start() {
   try {
+    // Run migrations before anything else
+    try {
+      console.log('Running database migrations...');
+      execSync('npx prisma migrate deploy', { stdio: 'inherit', cwd: process.cwd() });
+      console.log('Migrations applied successfully');
+    } catch (migrationErr) {
+      console.error('Migration failed:', migrationErr);
+      // Don't exit — maybe tables already exist
+    }
+
     const app = await buildApp();
 
     // Verify database connection
