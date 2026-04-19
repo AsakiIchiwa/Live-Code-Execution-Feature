@@ -3,6 +3,11 @@
 # Usage: sh scripts/start-all.sh
 
 echo "Running database migrations..."
+
+# Resolve any previously failed migrations
+npx prisma migrate resolve --rolled-back 20260419034633_add_full_features 2>/dev/null || true
+npx prisma migrate resolve --rolled-back 20260419042842_add_marketplace_and_soft_delete 2>/dev/null || true
+
 npx prisma migrate deploy
 
 # Only seed if RUN_SEED=true (set this on first deploy only, then remove it)
