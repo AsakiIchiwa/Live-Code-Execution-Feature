@@ -291,7 +291,26 @@ JWT_REFRESH_EXPIRES_IN_DAYS=30
 SESSION_TTL_HOURS=4
 MAX_EXECUTIONS_PER_MINUTE=10
 WORKER_CONCURRENCY=5
+RUN_SEED=true                # Only set on first deploy, then remove
 ```
+
+---
+
+## Deployment (Render)
+
+The Docker Command is `sh scripts/start-all.sh`, which runs:
+
+1. `prisma migrate deploy` — applies only **new** migrations (safe, no data loss)
+2. Seed — **only runs if `RUN_SEED=true`** environment variable is set
+
+**First deploy:**
+1. Set `RUN_SEED=true` in Render Environment Variables
+2. Deploy → migrations run + seed inserts reference data
+3. **Remove** `RUN_SEED` after successful deploy
+
+**Subsequent deploys:**
+- Seed is skipped automatically → user data is preserved
+- Only new migrations (if any) are applied
 
 ---
 

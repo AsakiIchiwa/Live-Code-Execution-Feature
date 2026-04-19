@@ -505,6 +505,14 @@ Multi-stage build using `node:20-slim`:
 1. **Builder:** Install deps → generate Prisma → compile TypeScript
 2. **Production:** Copy dist + node_modules + prisma. `tini` as PID 1, non-root user
 
+### `scripts/start-all.sh`
+
+Docker entrypoint script:
+1. Runs `prisma migrate deploy` (safe — only applies new migrations)
+2. Runs seed **only if** `RUN_SEED=true` env var is set (prevents data loss on redeploy)
+3. Starts API server + worker as background processes
+4. Handles graceful shutdown via SIGTERM/SIGINT
+
 ---
 
 ## 14. Security Architecture
