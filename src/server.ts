@@ -105,8 +105,8 @@ async function start() {
     // Run migrations before anything else
     try {
       console.log('Running database migrations...');
-      execSync('npx prisma migrate deploy', { stdio: 'inherit', cwd: process.cwd() });
-      console.log('Migrations applied successfully');
+      execSync('npx prisma db push --accept-data-loss', { stdio: 'inherit', cwd: process.cwd() });
+      console.log('Database schema synced successfully');
     } catch (migrationErr) {
       console.error('Migration failed:', migrationErr);
       // Don't exit — maybe tables already exist
