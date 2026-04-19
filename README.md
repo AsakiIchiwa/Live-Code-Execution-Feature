@@ -1,6 +1,9 @@
-# Live Code Execution Backend
+# EdStronaunt — Live Code Execution Backend
 
-Secure live code execution backend for the Edtronaut Job Simulation Platform. Learners can create coding sessions, write/autosave code, submit for execution, and poll results -- all through a RESTful API.
+Backend API for the EdStronaunt mobile coding education platform. Features JWT authentication, language/lesson pack management, code playground sessions, study-mode grading, progress tracking, and live code execution — all through a RESTful API.
+
+**Live**: https://live-code-execution-api.onrender.com  
+**Repo**: https://github.com/AsakiIchiwa/Live-Code-Execution-Feature
 
 ## Requirements
 
@@ -11,75 +14,198 @@ Secure live code execution backend for the Edtronaut Job Simulation Platform. Le
 
 ## Setup Instructions
 
-### Option 1: Docker (simplest -- one command)
+### Option 1: Docker (simplest — one command)
 
 ```bash
-# Start everything (PostgreSQL, Redis, API, Worker)
 docker compose up --build -d
-
-# Verify: open http://localhost:3000/health
-
-# Stop everything
+# Verify: http://localhost:3000/health
 docker compose down -v
 ```
 
 ### Option 2: Local development
 
-#### Step 1: Install dependencies
-
 ```bash
+# 1. Install dependencies
 npm install
-```
 
-#### Step 2: Create config file
-
-```bash
+# 2. Create config
 cp .env.example .env
-```
 
-#### Step 3: Start PostgreSQL + Redis
-
-```bash
+# 3. Start PostgreSQL + Redis
 docker compose up postgres redis -d
-```
 
-#### Step 4: Generate Prisma Client + run migrations + seed data
-
-```bash
+# 4. Generate Prisma Client + migrate + seed
 npm run db:generate
 npm run db:migrate
 npm run db:seed
-```
 
-#### Step 5: Start API server
-
-```bash
+# 5. Start API server
 npm run dev
-```
 
-> Server runs at http://localhost:3000
-
-#### Step 6: Start Worker (open a new terminal)
-
-```bash
+# 6. Start Worker (new terminal)
 npm run worker
 ```
 
-> Worker processes code execution jobs from the queue.
+> Server runs at http://localhost:3000  
+> Swagger docs at http://localhost:3000/docs
 
 ---
 
-## Running Tests
+## Authentication
 
-```bash
-# Unit tests only (no database needed)
-npm test -- tests/unit
+All authenticated endpoints require a JWT Bearer token in the `Authorization` header:
 
-# All tests (requires PostgreSQL + Redis running)
-npm test
+```
+Authorization: Bearer <access_token>
 ```
 
-Test results: **50 tests** (29 unit + 21 integration), 0 skipped, 0 failed.
+### Getting a token
+
+```bash
+# Register
+curl -X POST http://localhost:3000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"password123","display_name":"User"}'
+
+# Login
+curl -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"password123"}'
+
+# Device login (anonymous)
+curl -X POST http://localhost:3000/api/v1/auth/device-login \
+  -H "Content-Type: application/json" \
+  -d '{"device_id":"unique-device-id"}'
+```
+
+All auth endpoints return `{ access_token, refresh_token, user }`.
+
+### Default admin account (from seed)
+
+- Email: `admin@edtronaut.ai`
+- Password: `admin123`
+
+---
+
+## API Endpoints
+
+### Health & System
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health` | No | Health check |
+| GET | `/health/worker` | No | Worker + queue health |
+| GET | `/api/v1/system/status` | No | DB + Redis connectivity |
+| GET | `/api/v1/system/supported-languages` | No | List active languages |
+| GET | `/api/v1/system/runtime-config` | No | Runtime configuration |
+
+### Auth (6 endpoints)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/v1/auth/register` | No | Register with email/password |
+| POST | `/api/v1/auth/login` | No | Login with email/password |
+| POST | `/api/v1/auth/device-login` | No | Anonymous device login |
+| POST | `/api/v1/auth/refresh` | No | Refresh access token |
+| POST | `/api/v1/auth/logout` | Yes | Revoke refresh tokens |
+| GET | `/api/v1/auth/me` | Yes | Get current user profile |
+
+### User Profile & Settings (3 endpoints)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| PATCH | `/api/v1/users/me` | Yes | Update profile (display_name, avatar_url) |
+| GET | `/api/v1/users/me/settings` | Yes | Get settings |
+| PATCH | `/api/v1/users/me/settings` | Yes | Update settings (theme, font_size, etc.) |
+
+### Language Packs (7 endpoints)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/language-packs` | Yes | List published packs |
+| GET | `/api/v1/language-packs/:pack_id` | Yes | Get pack details |
+| POST | `/api/v1/language-packs/:pack_id/unlock` | Yes | Unlock a pack |
+| POST | `/api/v1/language-packs/:pack_id/install` | Yes | Install a pack |
+| GET | `/api/v1/users/me/language-packs` | Yes | List user's packs |
+| DELETE | `/api/v1/users/me/language-packs/:pack_id` | Yes | Uninstall a pack |
+| GET | `/api/v1/language-packs/:pack_id/manifest` | Yes | Get pack manifest |
+
+### Lesson Packs (7 endpoints)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/lesson-packs` | Yes | List published packs (filterable) |
+| GET | `/api/v1/lesson-packs/:pack_id` | Yes | Get pack details |
+| POST | `/api/v1/lesson-packs/:pack_id/unlock` | Yes | Unlock a pack |
+| GET | `/api/v1/users/me/lesson-packs` | Yes | List user's packs |
+| GET | `/api/v1/lesson-packs/:pack_id/manifest` | Yes | Get pack manifest |
+| GET | `/api/v1/lesson-packs/:pack_id/lessons` | Yes | List lessons in pack |
+| GET | `/api/v1/lessons/:lesson_id` | Yes | Get lesson details |
+
+### Progress Tracking (6 endpoints)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/users/me/progress` | Yes | Overall progress overview |
+| GET | `/api/v1/users/me/progress/lesson-packs/:pack_id` | Yes | Pack progress (%) |
+| GET | `/api/v1/users/me/progress/lessons/:lesson_id` | Yes | Lesson progress |
+| PATCH | `/api/v1/users/me/progress/lessons/:lesson_id` | Yes | Update lesson progress |
+| POST | `/api/v1/lessons/:lesson_id/complete` | Yes | Mark lesson complete |
+| POST | `/api/v1/lessons/:lesson_id/unlock-next` | Yes | Unlock next lesson |
+
+### Code Sessions (7 endpoints)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/v1/code-sessions` | Yes | Create session (playground/study) |
+| GET | `/api/v1/code-sessions` | Yes | List user's sessions |
+| GET | `/api/v1/code-sessions/:session_id` | Yes | Get session details |
+| PATCH | `/api/v1/code-sessions/:session_id` | Yes | Autosave code |
+| POST | `/api/v1/code-sessions/:session_id/autosave` | Yes | Autosave (alternate) |
+| DELETE | `/api/v1/code-sessions/:session_id` | Yes | Close/delete session |
+
+### Executions (3 endpoints)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/v1/code-sessions/:session_id/run` | Yes | Execute code |
+| GET | `/api/v1/executions/:execution_id` | Yes | Get execution result |
+| GET | `/api/v1/code-sessions/:session_id/executions` | Yes | List executions |
+
+### Submissions — Study Mode (5 endpoints)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/v1/lessons/:lesson_id/submissions` | Yes | Submit code for grading |
+| GET | `/api/v1/submissions/:submission_id` | Yes | Get submission |
+| GET | `/api/v1/lessons/:lesson_id/submissions` | Yes | List lesson submissions |
+| POST | `/api/v1/submissions/:submission_id/recheck` | Yes | Re-grade submission |
+| GET | `/api/v1/submissions/:submission_id/result` | Yes | Get grading result |
+
+### Tests & Content (4 endpoints)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/lessons/:lesson_id/test-summary` | Yes | Test case summary |
+| GET | `/api/v1/lessons/:lesson_id/public-tests` | Yes | Public test cases |
+| POST | `/api/v1/lessons/:lesson_id/run-sample` | Yes | Run against sample tests |
+| GET | `/api/v1/downloads/language-packs/:pack_id` | Yes | Download language pack |
+| GET | `/api/v1/downloads/lesson-packs/:pack_id` | Yes | Download lesson pack |
+
+### Admin (10 endpoints, requires ADMIN role)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/admin/language-packs` | Create language pack |
+| PATCH | `/api/v1/admin/language-packs/:pack_id` | Update language pack |
+| POST | `/api/v1/admin/language-packs/:pack_id/publish` | Publish language pack |
+| POST | `/api/v1/admin/lesson-packs` | Create lesson pack |
+| PATCH | `/api/v1/admin/lesson-packs/:pack_id` | Update lesson pack |
+| POST | `/api/v1/admin/lesson-packs/:pack_id/publish` | Publish lesson pack |
+| POST | `/api/v1/admin/lessons` | Create lesson |
+| PATCH | `/api/v1/admin/lessons/:lesson_id` | Update lesson |
+| POST | `/api/v1/admin/lessons/:lesson_id/test-cases` | Create test case |
+| PATCH | `/api/v1/admin/test-cases/:test_case_id` | Update test case |
 
 ---
 
@@ -90,361 +216,81 @@ Test results: **50 tests** (29 unit + 21 integration), 0 skipped, 0 failed.
 | Component | Technology | Rationale |
 |-----------|-----------|-----------|
 | API Framework | Fastify | ~2x throughput vs Express, built-in validation hooks, TypeScript-first |
+| Auth | JWT (jsonwebtoken + bcryptjs) | Stateless auth, refresh token rotation |
 | Queue | BullMQ + Redis | Node.js native, battle-tested, built-in retry/backoff/dead-letter |
 | Database | PostgreSQL + Prisma ORM | ACID compliance, strong schema with FK integrity, type-safe queries |
 | Validation | Zod | Runtime validation with automatic TypeScript type inference |
 | Testing | Vitest | Fast, ESM-native, compatible with Fastify inject() |
 
-### End-to-End Request Flow
+### Database Schema
 
 ```
-1. CREATE SESSION
-   Client -> POST /api/v1/code-sessions
-     -> Zod validates body (simulation_id, user_id, language)
-     -> Verify language exists in supported_languages table
-     -> INSERT code_sessions (status=ACTIVE, expires_at=now+4h)
-     -> Return { session_id, status: "ACTIVE" }
+users (1) ──── (N) refresh_tokens
+  │  (1) ──── (1) user_settings
+  │  (1) ──── (N) user_language_packs ──── (1) language_packs
+  │  (1) ──── (N) user_lesson_packs  ──── (1) lesson_packs
+  │  (1) ──── (N) code_sessions
+  │  (1) ──── (N) submissions
+  │  (1) ──── (N) lesson_progress
 
-2. AUTOSAVE
-   Client -> PATCH /api/v1/code-sessions/:session_id
-     -> Verify ownership (x-user-id header == session.user_id)
-     -> Optimistic locking: check version matches
-     -> TRANSACTION: UPDATE source_code + version++, INSERT code_snapshot
-     -> Cleanup old snapshots (keep latest 50)
-     -> Return { session_id, version }
+language_packs (1) ──── (N) lesson_packs (1) ──── (N) lessons (1) ──── (N) test_cases
+                                                    │  (1) ──── (N) submissions
 
-3. EXECUTE CODE
-   Client -> POST /api/v1/code-sessions/:session_id/run
-     -> Verify ownership + session active + not expired
-     -> Rate limit check (Redis counter, max 10/min per user)
-     -> Cooldown check (3 consecutive timeouts -> block 60s)
-     -> Snapshot current code, generate idempotency key
-     -> TRANSACTION: INSERT execution (status=QUEUED) + execution_log
-     -> Enqueue job to BullMQ (payload = execution_id only)
-     -> Return 202 { execution_id, status: "QUEUED" }
-
-4. WORKER PROCESSES JOB
-   BullMQ dequeues job
-     -> Fetch execution from DB (include snapshot, language config)
-     -> Atomic claim: UPDATE WHERE status='QUEUED' -> status='RUNNING'
-       (if affected_rows=0, another worker claimed it -> skip)
-     -> Write source code to temp file
-     -> Spawn child process with timeout + memory limits
-     -> Capture stdout/stderr, sanitize output
-     -> UPDATE execution with result (COMPLETED/FAILED/TIMEOUT)
-     -> Log state transition in execution_logs
-     -> Track timeout streaks for abuse prevention
-
-5. POLL RESULT
-   Client -> GET /api/v1/executions/:execution_id (poll every 1-2s)
-     -> Return execution status + stdout/stderr when terminal state
-     -> Include lifecycle logs for transparency
+supported_languages (1) ──── (N) code_sessions (1) ──── (N) code_snapshots
+                    (1) ──── (N) executions    (1) ──── (N) execution_logs
+                                 code_sessions (1) ──── (N) executions
 ```
 
-### Execution Lifecycle & State Management
+**17 tables:** users, refresh_tokens, user_settings, language_packs, user_language_packs, lesson_packs, user_lesson_packs, lessons, test_cases, submissions, lesson_progress, supported_languages, code_sessions, code_snapshots, executions, execution_logs
 
-```
-  QUEUED -> RUNNING -> COMPLETED (exit code 0)
-                    -> FAILED    (exit code != 0 or worker error)
-                    -> TIMEOUT   (exceeded time limit, SIGKILL)
-```
+### Key Enums
 
-Each state transition is logged in `execution_logs` with timestamps, worker_id, and metadata (execution time, exit code, error details).
-
-### Database Schema (3NF Normalized)
-
-```
-supported_languages (1) <---- (N) code_sessions (1) <---- (N) code_snapshots
-                    (1) <---- (N) executions    (1) <---- (N) execution_logs
-                                  code_sessions (1) <---- (N) executions
-                                  code_snapshots(1) <---- (N) executions
-```
-
-**5 tables:**
-
-| Table | Purpose |
-|-------|---------|
-| `supported_languages` | Reference table for languages (python, javascript, java, cpp). `is_active` flag for disable without data loss |
-| `code_sessions` | Core entity. Tracks current source_code, version (optimistic lock), expires_at (TTL 4h) |
-| `code_snapshots` | Autosave history. UNIQUE(session_id, version). Retention: 50 per session |
-| `executions` | Execution records. Links to snapshot (exact code that ran). Idempotency key prevents duplicates |
-| `execution_logs` | Audit trail. from_status -> to_status with timestamps and JSONB metadata |
-
-### Queue-Based Execution Design
-
-- **Producer** (API): `executionService.submitExecution()` enqueues jobs with only `execution_id` as payload. Source code never passes through Redis (security).
-- **Consumer** (Worker): Separate process, scales independently. Fetches execution details from DB, runs code in sandbox.
-- **Retry**: BullMQ handles retries automatically. Config: max 3 attempts, exponential backoff (2s, 4s, 8s).
-- **Dead-letter**: Failed jobs retained 24h for debugging. Completed jobs cleaned after 1h or 1000 count.
+- **UserRole**: `USER`, `ADMIN`
+- **SessionMode**: `PLAYGROUND`, `STUDY`
+- **Difficulty**: `BEGINNER`, `INTERMEDIATE`, `ADVANCED`
+- **LessonType**: `TUTORIAL`, `EXERCISE`, `QUIZ`, `CODING`
+- **SubmissionStatus**: `PENDING`, `RUNNING`, `PASSED`, `FAILED`, `ERROR`
+- **ProgressStatus**: `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED`
 
 ---
 
 ## Reliability & Safety
 
-### Idempotency
+### Authentication & Authorization
 
-Each execution has a unique `idempotency_key = SHA256(session_id + snapshot_id + user_id)`. If the same code/user combination is submitted again, the existing execution is returned instead of creating a duplicate.
-
-### Atomic Claim (Preventing Duplicate Processing)
-
-```sql
-UPDATE executions SET status='RUNNING', worker_id='...'
-WHERE id='{id}' AND status='QUEUED'
-```
-
-If `affected_rows = 0`, another worker already claimed the job -> skip. This prevents duplicate processing when running multiple workers.
+| Protection | Mechanism |
+|-----------|-----------|
+| JWT Auth | Bearer token in Authorization header, 15min expiry |
+| Refresh tokens | Rotation on use, revocation on logout |
+| Role-based access | ADMIN role required for content management |
+| Ownership checks | Users can only access their own sessions/data |
 
 ### Abuse Protection
 
 | Protection | Mechanism |
 |-----------|-----------|
 | Rate limiting | Redis counter: max 10 executions/minute per user |
-| Cooldown | 3 consecutive timeouts -> block user for 60s |
+| Cooldown | 3 consecutive timeouts → block user for 60s |
 | Infinite loops | SIGKILL after timeout (cannot be trapped by user code) |
-| Excessive output | stdout/stderr truncated to 1MB |
 | Large code | source_code max 50KB (Zod validation) |
-| Request body | Fastify bodyLimit 1MB |
-| Output sanitization | Strip ANSI escape codes + control characters |
+| Output truncation | stdout/stderr truncated to 1MB |
 | Session expiry | Auto-expire after 4h (configurable TTL) |
 
-### Error Handling
-
-| Error Type | HTTP Status | Example |
-|-----------|-------------|---------|
-| Validation error (Zod) | 400 | Invalid UUID, missing field |
-| Language not supported | 400 | `language: "brainfuck"` |
-| Missing x-user-id | 401 | No auth header |
-| Wrong user | 403 | Accessing another user's session |
-| Not found | 404 | Session/execution doesn't exist |
-| Version conflict | 409 | Stale autosave version |
-| Rate limit | 429 | Too many executions |
-| Internal error | 500 | Never leaks stack trace |
-
 ---
 
-## Scalability Considerations
+## Environment Variables
 
-| Component | Current | Scale Strategy |
-|-----------|---------|---------------|
-| API servers | Single instance | Stateless -- add instances behind load balancer |
-| Workers | Single process | Add worker instances -- BullMQ distributes jobs automatically |
-| PostgreSQL | Single node | Read replicas for GET requests, PgBouncer for connection pooling |
-| Redis | Single node | Cluster mode for high throughput |
-
-### Potential Bottlenecks & Mitigations
-
-1. **Process spawn overhead** -> Pre-warmed process pool or Docker container pool
-2. **DB writes during peak autosave** -> Client-side debounce (3s), PgBouncer, batch writes
-3. **Redis memory** -> TTL on all keys, LRU eviction policy
-4. **Large stdout/stderr** -> Truncate to 1MB, consider streaming
-
-### Performance Estimates
-
-- API latency: ~5-20ms (create/autosave/poll)
-- Execution latency: 100ms-10s (depends on user code)
-- Queue throughput: ~1000 jobs/s per Redis instance
-
----
-
-## Design Decisions & Trade-offs
-
-| Decision | Optimized For | Trade-off |
-|----------|--------------|-----------|
-| **Polling instead of WebSocket** | Simplicity, stateless API, easy to scale | 1-2s delay, extra bandwidth. Upgrade path: SSE or WebSocket |
-| **Snapshot per autosave** | Audit trail, exact code-to-result mapping | Storage cost. Mitigated by retention policy (50 snapshots) |
-| **Job payload = ID only** | Security (source code never in Redis) | Extra DB query per job. Acceptable cost |
-| **SIGKILL instead of SIGTERM** | Guaranteed kill (user code can trap SIGTERM) | No graceful shutdown. Acceptable for sandbox |
-| **Optimistic locking (version)** | Prevent race conditions in autosave | Client must handle 409 Conflict + retry |
-| **Fastify over Express** | Performance (~2x throughput) | Smaller ecosystem than Express |
-| **BullMQ over RabbitMQ** | Node.js native, minimal infrastructure | Depends on Redis stability. Mitigated by Redis persistence |
-| **PostgreSQL over MongoDB** | ACID, strong schema, FK integrity | Less flexible for unstructured data. JSONB columns available |
-| **Separate API + Worker processes** | Independent scaling, fault isolation | More deployment complexity. Docker Compose handles it |
-| **Process sandbox (not Docker)** | Fast startup, simple development | Less isolation than containers. Production upgrade path documented |
-
----
-
-## Implemented Improvements
-
-- **OpenAPI/Swagger documentation**: Interactive API docs auto-generated from Fastify route schemas. Available at `http://localhost:3000/docs` when the server is running.
-
-- **Result caching**: Execution results for terminal states (COMPLETED/FAILED/TIMEOUT) are cached in Redis for 5 minutes. Subsequent polls hit Redis instead of PostgreSQL, significantly reducing DB load during client polling.
-
-- **Worker health check**: `GET /health/worker` endpoint checks queue status (job counts), Redis connectivity, and database connectivity. Returns `"ok"` or `"degraded"` with error details.
-
-## What I Would Improve With More Time
-
-1. **Container-based sandbox**: Replace `child_process.spawn()` with Docker containers per execution (`docker run --network=none --read-only --memory=256m --cpus=0.5 --pids-limit=10`). Add nsjail for syscall whitelisting.
-
-2. **WebSocket/SSE for real-time results**: Replace polling with Server-Sent Events for instant result delivery, reducing latency and bandwidth.
-
-3. **Authentication**: Replace `x-user-id` header with JWT-based auth middleware. Currently assumes trusted internal API.
-
-4. **Prometheus metrics**: Add execution time histograms, queue depth gauges, error rate counters for production monitoring.
-
-5. **Multi-file execution**: Support projects with multiple files (e.g., Java with package structure).
-
----
-
-## API Documentation
-
-### Health Check
-
-```
-GET /health
-```
-
-Response (200):
-```json
-{
-  "status": "ok",
-  "timestamp": "2024-01-01T00:00:00.000Z",
-  "uptime": 123.456
-}
-```
-
-### Code Sessions
-
-#### Create Session
-
-```
-POST /api/v1/code-sessions
-Content-Type: application/json
-```
-
-Body:
-```json
-{
-  "simulation_id": "uuid",
-  "user_id": "uuid",
-  "language": "python",
-  "template_code": "# Write your solution\n"
-}
-```
-
-Response (201):
-```json
-{
-  "session_id": "uuid",
-  "status": "ACTIVE",
-  "language": "python",
-  "language_version": "3.12",
-  "expires_at": "2024-01-01T04:00:00.000Z",
-  "created_at": "2024-01-01T00:00:00.000Z"
-}
-```
-
-#### Autosave Code
-
-```
-PATCH /api/v1/code-sessions/:session_id
-Content-Type: application/json
-x-user-id: uuid
-```
-
-Body:
-```json
-{
-  "source_code": "print('Hello World')",
-  "version": 1
-}
-```
-
-Response (200):
-```json
-{
-  "session_id": "uuid",
-  "status": "ACTIVE",
-  "version": 2,
-  "updated_at": "2024-01-01T00:01:00.000Z"
-}
-```
-
-#### Get Session Details
-
-```
-GET /api/v1/code-sessions/:session_id
-```
-
-Response (200):
-```json
-{
-  "session_id": "uuid",
-  "simulation_id": "uuid",
-  "user_id": "uuid",
-  "language": "python",
-  "language_version": "3.12",
-  "source_code": "print('Hello World')",
-  "status": "ACTIVE",
-  "version": 2,
-  "expires_at": "...",
-  "created_at": "...",
-  "updated_at": "..."
-}
-```
-
-### Execution
-
-#### Run Code
-
-```
-POST /api/v1/code-sessions/:session_id/run
-x-user-id: uuid
-```
-
-Response (202):
-```json
-{
-  "execution_id": "uuid",
-  "status": "QUEUED"
-}
-```
-
-#### Get Execution Result
-
-```
-GET /api/v1/executions/:execution_id
-```
-
-Response when COMPLETED (200):
-```json
-{
-  "execution_id": "uuid",
-  "session_id": "uuid",
-  "status": "COMPLETED",
-  "stdout": "Hello World\n",
-  "stderr": "",
-  "exit_code": 0,
-  "execution_time_ms": 120,
-  "queued_at": "...",
-  "started_at": "...",
-  "completed_at": "...",
-  "lifecycle": [
-    { "fromStatus": null, "toStatus": "QUEUED", "createdAt": "..." },
-    { "fromStatus": "QUEUED", "toStatus": "RUNNING", "createdAt": "..." },
-    { "fromStatus": "RUNNING", "toStatus": "COMPLETED", "createdAt": "..." }
-  ]
-}
-```
-
-#### List Session Executions
-
-```
-GET /api/v1/code-sessions/:session_id/executions
-```
-
-Response (200):
-```json
-{
-  "executions": [
-    {
-      "id": "uuid",
-      "status": "COMPLETED",
-      "executionTimeMs": 120,
-      "queuedAt": "...",
-      "completedAt": "..."
-    }
-  ]
-}
+```env
+DATABASE_URL=postgresql://user:pass@localhost:5432/dbname
+REDIS_URL=redis://localhost:6379
+PORT=3000
+NODE_ENV=development
+JWT_SECRET=your-secret-key
+JWT_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN_DAYS=30
+SESSION_TTL_HOURS=4
+MAX_EXECUTIONS_PER_MINUTE=10
+WORKER_CONCURRENCY=5
 ```
 
 ---
@@ -461,11 +307,9 @@ Response (200):
 | `npm run db:generate` | Generate Prisma Client |
 | `npm run db:migrate` | Run migrations (dev) |
 | `npm run db:migrate:prod` | Run migrations (production) |
-| `npm run db:seed` | Seed language data |
+| `npm run db:seed` | Seed data (languages, packs, admin user) |
 | `npm run db:reset` | Reset entire database |
 | `npm test` | Run all tests |
-| `npm run docker:up` | Start all Docker services |
-| `npm run docker:down` | Stop Docker + remove data |
 
 ---
 
@@ -473,20 +317,32 @@ Response (200):
 
 ```
 src/
-|-- server.ts              # Fastify app bootstrap
-|-- config/                # Configuration (env, database, redis)
-|-- controllers/           # HTTP request handlers
-|-- services/              # Business logic (no HTTP knowledge)
-|-- middlewares/            # Error handler
-|-- routes/                # Route registration
-|-- types/                 # Zod validation schemas
-|-- utils/                 # Helpers (hashing, sanitization, AppError)
-|-- workers/               # BullMQ worker (code execution consumer)
+├── server.ts              # Fastify app bootstrap
+├── config/                # Configuration (env, database, redis)
+├── controllers/           # HTTP request handlers
+├── services/              # Business logic (no HTTP knowledge)
+│   ├── authService.ts         # Register, login, device-login, refresh, logout
+│   ├── userSettingsService.ts # User settings CRUD
+│   ├── languagePackService.ts # Language pack management
+│   ├── lessonPackService.ts   # Lesson pack management
+│   ├── submissionService.ts   # Code submission & grading
+│   ├── progressService.ts     # Learning progress tracking
+│   ├── adminService.ts        # Admin content management
+│   ├── sessionService.ts      # Code session CRUD + autosave
+│   ├── executionService.ts    # Code execution + rate limiting
+│   └── sandboxService.ts      # Sandbox code runner
+├── middlewares/
+│   ├── authGuard.ts       # JWT auth + admin role guard
+│   └── errorHandler.ts    # Global error → HTTP response mapping
+├── routes/                # Route registration (70+ endpoints)
+├── types/                 # Zod validation schemas
+├── utils/                 # Helpers (hashing, sanitization, AppError)
+└── workers/               # BullMQ worker (code execution consumer)
 
 prisma/                    # Database schema + migrations + seed
 tests/
-|-- unit/                  # 29 unit tests (schemas, helpers)
-|-- integration/           # 21 integration tests (API + execution flow)
+├── unit/                  # Unit tests (schemas, helpers)
+└── integration/           # Integration tests (API + execution flow)
 ```
 
-> For detailed file-by-file documentation, see [ARCHITECTURE.md](../ARCHITECTURE.md).
+> For detailed file-by-file documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).

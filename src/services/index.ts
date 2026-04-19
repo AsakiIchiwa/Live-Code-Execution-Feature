@@ -1,3 +1,10 @@
 export { sessionService, SessionService } from './sessionService';
 export { executionService, ExecutionService } from './executionService';
 export { sandboxService, SandboxService } from './sandboxService';
+export { authService, AuthService } from './authService';
+export { userSettingsService, UserSettingsService } from './userSettingsService';
+export { languagePackService, LanguagePackService } from './languagePackService';
+export { lessonPackService, LessonPackService } from './lessonPackService';
+export { submissionService, SubmissionService } from './submissionService';
+export { progressService, ProgressService } from './progressService';
+export { adminService, AdminService } from './adminService';

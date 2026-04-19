@@ -15,6 +15,10 @@ const envSchema = z.object({
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().optional(),
 
+  JWT_SECRET: z.string().min(16).default('change-me-in-production-min-16-chars'),
+  JWT_EXPIRES_IN: z.string().default('15m'),
+  JWT_REFRESH_EXPIRES_IN_DAYS: z.coerce.number().default(30),
+
   EXEC_TIMEOUT_MS: z.coerce.number().default(10000),
   EXEC_MAX_MEMORY_KB: z.coerce.number().default(262144),
   EXEC_MAX_OUTPUT_BYTES: z.coerce.number().default(1048576),
@@ -22,7 +26,7 @@ const envSchema = z.object({
   EXEC_MAX_PIDS: z.coerce.number().default(10),
 
   RATE_LIMIT_EXECUTIONS_PER_MINUTE: z.coerce.number().default(10),
-  RATE_LIMIT_REQUESTS_PER_MINUTE: z.coerce.number().default(100),
+  RATE_LIMIT_REQUESTS_PER_MINUTE: z.coerce.number().default(200),
   RATE_LIMIT_COOLDOWN_AFTER_TIMEOUTS: z.coerce.number().default(3),
   RATE_LIMIT_COOLDOWN_SECONDS: z.coerce.number().default(60),
 

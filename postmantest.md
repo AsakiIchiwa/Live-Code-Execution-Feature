@@ -15,326 +15,533 @@ Tạo các biến trong Postman (tab **Variables** của Collection):
 | Biến | Giá trị |
 |------|---------|
 | `base_url` | `http://localhost:3000` |
-| `user_id` | `660e8400-e29b-41d4-a716-446655440001` |
-| `simulation_id` | `550e8400-e29b-41d4-a716-446655440000` |
+| `token` | _(sẽ lấy từ bước đăng ký/đăng nhập)_ |
 
-> Hoặc thay trực tiếp vào các request bên dưới.
+> Sau khi đăng nhập, copy `access_token` vào biến `token`.
+
+### Cách set Authorization cho tất cả request
+
+Trong tab **Authorization** của Collection:
+- Type: **Bearer Token**
+- Token: `{{token}}`
 
 ---
 
 ## Bước 1: Health Check
 
-Kiểm tra server đã chạy chưa.
-
 ```
 GET {{base_url}}/health
 ```
 
-**Kết quả mong đợi** (200 OK):
-
+Response (200):
 ```json
 {
   "status": "ok",
-  "timestamp": "2026-04-10T10:00:00.000Z",
+  "timestamp": "2026-04-19T00:00:00.000Z",
   "uptime": 123.456
 }
 ```
 
 ---
 
-## Bước 2: Tạo Code Session
+## Bước 2: Đăng ký tài khoản
 
-Tạo một phiên code mới.
+```
+POST {{base_url}}/api/v1/auth/register
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "email": "test@example.com",
+  "password": "password123",
+  "display_name": "Test User"
+}
+```
+
+Response (201):
+```json
+{
+  "user": {
+    "id": "uuid",
+    "email": "test@example.com",
+    "displayName": "Test User",
+    "role": "USER",
+    "createdAt": "..."
+  },
+  "access_token": "eyJhbGci...",
+  "refresh_token": "uuid-uuid"
+}
+```
+
+> ⚡ **Copy `access_token` vào biến `token`** để dùng cho các request tiếp theo.
+
+---
+
+## Bước 3: Đăng nhập
+
+```
+POST {{base_url}}/api/v1/auth/login
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "email": "test@example.com",
+  "password": "password123"
+}
+```
+
+> Response giống đăng ký. Copy `access_token` vào biến `token`.
+
+---
+
+## Bước 4: Đăng nhập bằng thiết bị (ẩn danh)
+
+```
+POST {{base_url}}/api/v1/auth/device-login
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "device_id": "my-phone-unique-id"
+}
+```
+
+---
+
+## Bước 5: Xem thông tin người dùng
+
+```
+GET {{base_url}}/api/v1/auth/me
+Authorization: Bearer {{token}}
+```
+
+---
+
+## Bước 6: Cập nhật profile
+
+```
+PATCH {{base_url}}/api/v1/users/me
+Authorization: Bearer {{token}}
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "display_name": "New Name"
+}
+```
+
+---
+
+## Bước 7: Xem/cập nhật cài đặt
+
+### Xem cài đặt
+
+```
+GET {{base_url}}/api/v1/users/me/settings
+Authorization: Bearer {{token}}
+```
+
+### Cập nhật cài đặt
+
+```
+PATCH {{base_url}}/api/v1/users/me/settings
+Authorization: Bearer {{token}}
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "editor_theme": "light",
+  "font_size": 16,
+  "auto_save": true,
+  "preferred_mode": "study"
+}
+```
+
+---
+
+## Bước 8: Language Packs
+
+### Danh sách language packs
+
+```
+GET {{base_url}}/api/v1/language-packs
+Authorization: Bearer {{token}}
+```
+
+### Mở khóa language pack
+
+```
+POST {{base_url}}/api/v1/language-packs/{{pack_id}}/unlock
+Authorization: Bearer {{token}}
+```
+
+### Cài đặt language pack
+
+```
+POST {{base_url}}/api/v1/language-packs/{{pack_id}}/install
+Authorization: Bearer {{token}}
+```
+
+### Xem language packs đã cài
+
+```
+GET {{base_url}}/api/v1/users/me/language-packs
+Authorization: Bearer {{token}}
+```
+
+### Gỡ cài đặt
+
+```
+DELETE {{base_url}}/api/v1/users/me/language-packs/{{pack_id}}
+Authorization: Bearer {{token}}
+```
+
+---
+
+## Bước 9: Lesson Packs
+
+### Danh sách lesson packs
+
+```
+GET {{base_url}}/api/v1/lesson-packs
+Authorization: Bearer {{token}}
+```
+
+Query params (tùy chọn):
+- `language`: filter theo ngôn ngữ (vd: `java`)
+- `difficulty`: `BEGINNER`, `INTERMEDIATE`, `ADVANCED`
+- `free_only`: `true` / `false`
+- `page`: số trang
+- `limit`: số item/trang
+
+### Mở khóa lesson pack
+
+```
+POST {{base_url}}/api/v1/lesson-packs/{{pack_id}}/unlock
+Authorization: Bearer {{token}}
+```
+
+### Xem danh sách bài học
+
+```
+GET {{base_url}}/api/v1/lesson-packs/{{pack_id}}/lessons
+Authorization: Bearer {{token}}
+```
+
+### Xem chi tiết bài học
+
+```
+GET {{base_url}}/api/v1/lessons/{{lesson_id}}
+Authorization: Bearer {{token}}
+```
+
+---
+
+## Bước 10: Code Sessions (Playground)
+
+### Tạo session mới
 
 ```
 POST {{base_url}}/api/v1/code-sessions
+Authorization: Bearer {{token}}
+Content-Type: application/json
 ```
 
-**Headers:**
-
-| Key | Value |
-|-----|-------|
-| Content-Type | application/json |
-
-**Body** (raw JSON):
-
+Body:
 ```json
 {
-  "simulation_id": "550e8400-e29b-41d4-a716-446655440000",
-  "user_id": "660e8400-e29b-41d4-a716-446655440001",
-  "language": "python",
-  "template_code": "# Write your solution\n"
+  "language": "java",
+  "title": "My First Program",
+  "mode": "PLAYGROUND"
 }
 ```
 
-**Kết quả mong đợi** (201 Created):
-
+Response (201):
 ```json
 {
-  "session_id": "abc12345-...",
+  "session_id": "uuid",
+  "title": "My First Program",
+  "mode": "PLAYGROUND",
   "status": "ACTIVE",
-  "language": "python",
-  "language_version": "3.11",
-  "expires_at": "2026-04-11T10:00:00.000Z",
-  "created_at": "2026-04-10T10:00:00.000Z"
-}
-```
-
-> **Lưu giá trị `session_id`** để dùng cho các bước tiếp theo.
-
----
-
-## Bước 3: Xem chi tiết Session
-
-```
-GET {{base_url}}/api/v1/code-sessions/{{session_id}}
-```
-
-Thay `{{session_id}}` bằng giá trị nhận được từ Bước 2.
-
-**Kết quả mong đợi** (200 OK):
-
-```json
-{
-  "session_id": "abc12345-...",
-  "simulation_id": "550e8400-...",
-  "user_id": "660e8400-...",
-  "language": "python",
-  "language_version": "3.11",
-  "source_code": "# Write your solution\n",
-  "status": "ACTIVE",
-  "version": 1,
+  "language": "java",
+  "language_version": "21",
   "expires_at": "...",
-  "created_at": "...",
-  "updated_at": "..."
+  "created_at": "..."
 }
 ```
 
----
+### Danh sách sessions
 
-## Bước 4: Autosave code (cập nhật code)
+```
+GET {{base_url}}/api/v1/code-sessions
+Authorization: Bearer {{token}}
+```
 
-Lưu code mới vào session. Cần gửi kèm `version` hiện tại (optimistic locking).
+### Autosave code
 
 ```
 PATCH {{base_url}}/api/v1/code-sessions/{{session_id}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
 ```
 
-**Headers:**
-
-| Key | Value |
-|-----|-------|
-| Content-Type | application/json |
-| x-user-id | 660e8400-e29b-41d4-a716-446655440001 |
-
-**Body** (raw JSON):
-
+Body:
 ```json
 {
-  "source_code": "print('Hello World')",
+  "source_code": "public class Main {\n  public static void main(String[] args) {\n    System.out.println(\"Hello World\");\n  }\n}",
   "version": 1
 }
 ```
 
-**Kết quả mong đợi** (200 OK):
-
-```json
-{
-  "session_id": "abc12345-...",
-  "status": "ACTIVE",
-  "version": 2,
-  "updated_at": "..."
-}
-```
-
-> Mỗi lần autosave thành công, `version` tăng lên 1. Lần autosave tiếp theo phải gửi `version: 2`.
-
----
-
-## Bước 5: Chạy code (Run Execution)
-
-Gửi code để thực thi. Server sẽ trả về ngay lập tức với status `QUEUED`, worker sẽ xử lý ngầm.
+### Chạy code
 
 ```
 POST {{base_url}}/api/v1/code-sessions/{{session_id}}/run
+Authorization: Bearer {{token}}
 ```
 
-**Headers:**
-
-| Key | Value |
-|-----|-------|
-| Content-Type | application/json |
-| x-user-id | 660e8400-e29b-41d4-a716-446655440001 |
-
-**Body**: `{}` (object rỗng)
-
-**Kết quả mong đợi** (202 Accepted):
-
+Response (202):
 ```json
 {
-  "execution_id": "xyz98765-...",
+  "execution_id": "uuid",
   "status": "QUEUED"
 }
 ```
 
-> **Lưu giá trị `execution_id`** để dùng cho bước tiếp theo.
-
----
-
-## Bước 6: Xem kết quả thực thi
-
-Poll kết quả cho đến khi `status` không còn là `QUEUED` hoặc `RUNNING`.
+### Xem kết quả (poll)
 
 ```
 GET {{base_url}}/api/v1/executions/{{execution_id}}
+Authorization: Bearer {{token}}
 ```
 
-Thay `{{execution_id}}` bằng giá trị nhận được từ Bước 5.
+> Poll mỗi 1-2 giây cho đến khi status = `COMPLETED` / `FAILED` / `TIMEOUT`.
 
-**Khi đang chờ** (status = QUEUED hoặc RUNNING):
-
-```json
-{
-  "execution_id": "xyz98765-...",
-  "session_id": "abc12345-...",
-  "status": "RUNNING",
-  "queued_at": "...",
-  "started_at": "...",
-  "completed_at": null,
-  "lifecycle": [...]
-}
-```
-
-**Khi hoàn thành** (status = COMPLETED):
-
-```json
-{
-  "execution_id": "xyz98765-...",
-  "session_id": "abc12345-...",
-  "status": "COMPLETED",
-  "queued_at": "...",
-  "started_at": "...",
-  "completed_at": "...",
-  "stdout": "Hello World\n",
-  "stderr": "",
-  "exit_code": 0,
-  "execution_time_ms": 150,
-  "memory_used_kb": null,
-  "lifecycle": [
-    { "fromStatus": null, "toStatus": "QUEUED", "createdAt": "..." },
-    { "fromStatus": "QUEUED", "toStatus": "RUNNING", "createdAt": "..." },
-    { "fromStatus": "RUNNING", "toStatus": "COMPLETED", "createdAt": "..." }
-  ]
-}
-```
-
-> Nếu `status` vẫn là `QUEUED` hoặc `RUNNING`, đợi 1-2 giây rồi gọi lại.
-
----
-
-## Bước 7: Xem lịch sử thực thi của Session
+### Xóa session
 
 ```
-GET {{base_url}}/api/v1/code-sessions/{{session_id}}/executions
-```
-
-**Kết quả mong đợi** (200 OK):
-
-```json
-{
-  "executions": [
-    {
-      "id": "xyz98765-...",
-      "status": "COMPLETED",
-      "executionTimeMs": 150,
-      "queuedAt": "...",
-      "completedAt": "..."
-    }
-  ]
-}
+DELETE {{base_url}}/api/v1/code-sessions/{{session_id}}
+Authorization: Bearer {{token}}
 ```
 
 ---
 
-## Các trường hợp lỗi thường gặp
+## Bước 11: Submissions (Study Mode)
 
-### Thiếu header `x-user-id` → 401
+### Nộp bài
 
 ```
-POST {{base_url}}/api/v1/code-sessions/{{session_id}}/run
+POST {{base_url}}/api/v1/lessons/{{lesson_id}}/submissions
+Authorization: Bearer {{token}}
+Content-Type: application/json
 ```
 
-Không gửi header `x-user-id`.
-
+Body:
 ```json
 {
-  "error": "UNAUTHORIZED",
-  "message": "Missing x-user-id header"
+  "source_code": "public class Main {\n  public static void main(String[] args) {\n    System.out.println(\"Hello World\");\n  }\n}",
+  "language": "java"
 }
 ```
 
-### Sai user → 403
+### Xem kết quả submission
 
-Gửi `x-user-id` khác với user tạo session.
-
-```json
-{
-  "error": "FORBIDDEN",
-  "message": "Access denied: you do not own this session"
-}
+```
+GET {{base_url}}/api/v1/submissions/{{submission_id}}
+Authorization: Bearer {{token}}
 ```
 
-### Version conflict khi autosave → 409
+### Danh sách submissions của bài học
 
-Gửi `version` cũ (không đúng version hiện tại).
-
-```json
-{
-  "error": "VERSION_CONFLICT",
-  "message": "Version conflict: expected 2, got 1. Refetch and retry."
-}
 ```
-
-### Session không tồn tại → 404
-
-```json
-{
-  "error": "SESSION_NOT_FOUND",
-  "message": "Session not found"
-}
-```
-
-### Rate limit → 429
-
-Gửi quá nhiều request chạy code trong 1 phút.
-
-```json
-{
-  "error": "RATE_LIMIT_EXCEEDED",
-  "message": "Rate limit exceeded: max 10 executions per minute"
-}
+GET {{base_url}}/api/v1/lessons/{{lesson_id}}/submissions
+Authorization: Bearer {{token}}
 ```
 
 ---
 
-## Các status thực thi
+## Bước 12: Progress Tracking
 
-| Status | Ý nghĩa |
-|--------|----------|
-| `QUEUED` | Đang chờ trong queue |
-| `RUNNING` | Worker đang thực thi |
-| `COMPLETED` | Chạy thành công (exit code = 0) |
-| `FAILED` | Có lỗi runtime (exit code ≠ 0) |
-| `TIMEOUT` | Quá thời gian cho phép (mặc định 10 giây) |
+### Tổng quan tiến độ
+
+```
+GET {{base_url}}/api/v1/users/me/progress
+Authorization: Bearer {{token}}
+```
+
+### Tiến độ theo lesson pack
+
+```
+GET {{base_url}}/api/v1/users/me/progress/lesson-packs/{{pack_id}}
+Authorization: Bearer {{token}}
+```
+
+### Hoàn thành bài học
+
+```
+POST {{base_url}}/api/v1/lessons/{{lesson_id}}/complete
+Authorization: Bearer {{token}}
+```
+
+### Mở khóa bài tiếp theo
+
+```
+POST {{base_url}}/api/v1/lessons/{{lesson_id}}/unlock-next
+Authorization: Bearer {{token}}
+```
 
 ---
 
-## Thứ tự test đề nghị
+## Bước 13: Refresh Token
 
-1. `GET /health` — kiểm tra server
-2. `POST /api/v1/code-sessions` — tạo session
-3. `GET /api/v1/code-sessions/:id` — xem session
-4. `PATCH /api/v1/code-sessions/:id` — autosave code
-5. `POST /api/v1/code-sessions/:id/run` — chạy code
-6. `GET /api/v1/executions/:id` — xem kết quả (gọi lại vài lần)
-7. `GET /api/v1/code-sessions/:id/executions` — xem lịch sử
+```
+POST {{base_url}}/api/v1/auth/refresh
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "refresh_token": "uuid-uuid"
+}
+```
+
+> Copy `access_token` mới vào biến `token`.
+
+---
+
+## Bước 14: Đăng xuất
+
+```
+POST {{base_url}}/api/v1/auth/logout
+Authorization: Bearer {{token}}
+```
+
+---
+
+## Admin Endpoints
+
+> Đăng nhập bằng tài khoản admin: `admin@edtronaut.ai` / `admin123`
+
+### Tạo language pack
+
+```
+POST {{base_url}}/api/v1/admin/language-packs
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "code": "python",
+  "name": "Python",
+  "description": "Python programming language",
+  "version": "1.0.0",
+  "is_free": true
+}
+```
+
+### Publish language pack
+
+```
+POST {{base_url}}/api/v1/admin/language-packs/{{pack_id}}/publish
+Authorization: Bearer {{admin_token}}
+```
+
+### Tạo lesson pack
+
+```
+POST {{base_url}}/api/v1/admin/lesson-packs
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "language_pack_id": "uuid",
+  "title": "Python Basics",
+  "description": "Learn Python fundamentals",
+  "difficulty": "BEGINNER"
+}
+```
+
+### Tạo lesson
+
+```
+POST {{base_url}}/api/v1/admin/lessons
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "lesson_pack_id": "uuid",
+  "title": "Hello World",
+  "description": "Print your first message",
+  "instructions": "Write a program that prints 'Hello World'",
+  "starter_code": "# Write your code here",
+  "type": "CODING",
+  "difficulty": "BEGINNER",
+  "order_index": 1
+}
+```
+
+### Tạo test case
+
+```
+POST {{base_url}}/api/v1/admin/lessons/{{lesson_id}}/test-cases
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+```
+
+Body:
+```json
+{
+  "input": "",
+  "expected": "Hello World",
+  "is_public": true,
+  "description": "Should print Hello World"
+}
+```
+
+### Publish lesson pack
+
+```
+POST {{base_url}}/api/v1/admin/lesson-packs/{{pack_id}}/publish
+Authorization: Bearer {{admin_token}}
+```
+
+---
+
+## System Endpoints (không cần auth)
+
+### Trạng thái hệ thống
+
+```
+GET {{base_url}}/api/v1/system/status
+```
+
+### Danh sách ngôn ngữ hỗ trợ
+
+```
+GET {{base_url}}/api/v1/system/supported-languages
+```
+
+### Runtime config
+
+```
+GET {{base_url}}/api/v1/system/runtime-config
+```

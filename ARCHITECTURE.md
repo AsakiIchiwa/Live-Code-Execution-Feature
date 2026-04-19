@@ -1,6 +1,6 @@
-# ARCHITECTURE.md -- Detailed System Documentation
+# ARCHITECTURE.md — Detailed System Documentation
 
-> File-by-file, function-by-function breakdown of the Live Code Execution system.
+> File-by-file, function-by-function breakdown of the EdStronaunt Live Code Execution system.
 
 ---
 
@@ -11,17 +11,15 @@
 3. [Config Layer](#3-config-layer)
 4. [Types & Validation](#4-types--validation)
 5. [Utilities](#5-utilities)
-6. [Services (Business Logic)](#6-services-business-logic)
-7. [Controllers (HTTP Layer)](#7-controllers-http-layer)
-8. [Middleware](#8-middleware)
+6. [Middleware](#6-middleware)
+7. [Services (Business Logic)](#7-services-business-logic)
+8. [Controllers (HTTP Layer)](#8-controllers-http-layer)
 9. [Routes](#9-routes)
 10. [Worker](#10-worker)
 11. [Server Entry Point](#11-server-entry-point)
 12. [Database Schema](#12-database-schema)
 13. [Docker & Infrastructure](#13-docker--infrastructure)
 14. [Security Architecture](#14-security-architecture)
-15. [Scalability Considerations](#15-scalability-considerations)
-16. [Trade-offs](#16-trade-offs)
 
 ---
 
@@ -30,8 +28,9 @@
 ```
 live-code-execution/
 ├── prisma/
-│   ├── schema.prisma          # Database schema (3NF normalized)
-│   └── seed.ts                # Seed supported languages
+│   ├── schema.prisma          # Database schema (17 tables, 6 enums)
+│   ├── seed.ts                # Seed languages, packs, lessons, admin user
+│   └── migrations/            # PostgreSQL migrations
 ├── src/
 │   ├── config/
 │   │   ├── env.ts             # Environment variable validation (Zod)
@@ -39,136 +38,144 @@ live-code-execution/
 │   │   ├── redis.ts           # Redis + BullMQ queue setup
 │   │   └── index.ts           # Barrel export
 │   ├── types/
-│   │   └── schemas.ts         # Zod request/response schemas
+│   │   └── schemas.ts         # Zod request/response schemas (all endpoints)
 │   ├── utils/
 │   │   └── helpers.ts         # Hashing, sanitization, AppError
 │   ├── services/
-│   │   ├── sessionService.ts  # Session CRUD + autosave + validation
-│   │   ├── executionService.ts # Execution submit + rate limit + caching
-│   │   ├── sandboxService.ts  # Code execution in isolated process
-│   │   └── index.ts           # Barrel export
+│   │   ├── authService.ts         # Register, login, device-login, refresh, logout
+│   │   ├── userSettingsService.ts # Get/update user settings
+│   │   ├── languagePackService.ts # Language pack unlock/install/manifest
+│   │   ├── lessonPackService.ts   # Lesson pack list/unlock/lessons
+│   │   ├── submissionService.ts   # Code submission & test-case grading
+│   │   ├── progressService.ts     # Learning progress tracking
+│   │   ├── adminService.ts        # Admin CRUD for packs/lessons/test-cases
+│   │   ├── sessionService.ts      # Session CRUD + autosave + validation
+│   │   ├── executionService.ts    # Execution submit + rate limit + caching
+│   │   ├── sandboxService.ts      # Code execution in isolated process
+│   │   └── index.ts               # Barrel export
 │   ├── controllers/
-│   │   ├── sessionController.ts  # HTTP handlers for /code-sessions
+│   │   ├── sessionController.ts   # HTTP handlers for /code-sessions
 │   │   └── executionController.ts # HTTP handlers for /executions
 │   ├── middlewares/
+│   │   ├── authGuard.ts       # JWT Bearer token verification + admin guard
 │   │   └── errorHandler.ts    # Global error -> HTTP response mapping
 │   ├── routes/
-│   │   └── index.ts           # Route registration + OpenAPI schemas
+│   │   └── index.ts           # 70+ route registrations + OpenAPI schemas
 │   ├── workers/
 │   │   └── executionWorker.ts # BullMQ consumer (processes code jobs)
 │   └── server.ts              # Fastify app bootstrap + plugin registration
 ├── scripts/
-│   └── start-all.sh           # Combined API + Worker startup script (for single-container deploy)
+│   └── start-all.sh           # Combined API + Worker startup (single-container)
 ├── tests/
-│   ├── unit/                  # 29 unit tests (schemas, helpers)
-│   └── integration/           # 21 integration tests (API + execution flow)
-├── docker-compose.yml         # One-command infrastructure
-├── Dockerfile                 # Multi-stage build (Debian slim)
+│   ├── unit/                  # Unit tests (schemas, helpers)
+│   └── integration/           # Integration tests (API + execution flow)
+├── docker-compose.yml
+├── Dockerfile
 ├── package.json
 ├── tsconfig.json
-├── prisma/tsconfig.json       # Prisma-specific TypeScript config
-├── vitest.config.ts
 └── .env.example
 ```
 
-**Designed with Separation of Concerns:**
-- `config/` -- Only connections + environment validation
-- `types/` -- Only schema validation definitions
-- `services/` -- Pure business logic, no HTTP knowledge
-- `controllers/` -- Only parse request -> call service -> format response
-- `workers/` -- Separate consumer process, can scale independently
-- `middlewares/` -- Cross-cutting concerns (error handling, logging)
+**Separation of Concerns:**
+- `config/` — Only connections + environment validation
+- `types/` — Only schema validation definitions
+- `services/` — Pure business logic, no HTTP knowledge
+- `controllers/` — Only parse request → call service → format response
+- `middlewares/` — Cross-cutting concerns (auth, error handling)
+- `workers/` — Separate consumer process, scales independently
 
 ---
 
 ## 2. Request Flow (End-to-End)
 
-### 2.1 Create Session
+### 2.1 Authentication Flow
+
+```
+Client -> POST /api/v1/auth/register (or /login or /device-login)
+  -> routes/index.ts (route matching)
+  -> Zod validates body
+  -> authService.register() / login() / deviceLogin()
+    -> Hash password (bcrypt, cost 12)
+    -> INSERT user + user_settings (transaction)
+    -> Generate JWT access_token (15min, HS256)
+    -> Generate refresh_token (UUID, stored in DB, 30 day expiry)
+  -> Return { user, access_token, refresh_token }
+```
+
+### 2.2 Authenticated Request Flow
+
+```
+Client -> Any protected endpoint
+  -> Authorization: Bearer <token>
+  -> authGuard middleware
+    -> Extract token from header
+    -> jwt.verify(token, JWT_SECRET)
+    -> Attach { userId, role } to request.currentUser
+  -> Controller handler
+    -> getCurrentUserId(request) extracts userId
+    -> Call service with userId
+```
+
+### 2.3 Create Code Session
 
 ```
 Client -> POST /api/v1/code-sessions
-  -> routes/index.ts (route matching + Fastify JSON Schema validation)
+  -> authGuard (JWT verification)
   -> sessionController.create()
-    -> Zod validates body (createSessionSchema)
+    -> Zod validates body (language, title, mode, template_code)
     -> sessionService.create()
-      -> Verify language exists & is active in supported_languages
+      -> Verify language exists & is active
       -> Calculate expires_at = now + SESSION_TTL_HOURS
-      -> INSERT into code_sessions
-    -> Return 201 { session_id, status: "ACTIVE" }
+      -> INSERT code_session with user_id from JWT
+    -> Return 201 { session_id, title, mode, status: "ACTIVE" }
 ```
 
-### 2.2 Autosave
+### 2.4 Autosave
 
 ```
 Client -> PATCH /api/v1/code-sessions/:session_id
+  -> authGuard
   -> sessionController.autosave()
-    -> Extract x-user-id header
-    -> Zod validates body (updateSessionSchema)
     -> sessionService.autosave()
-      -> getValidSession() -- verify ownership, active, not expired
+      -> getValidSession() — verify ownership, active, not expired
       -> Check version (optimistic locking)
       -> TRANSACTION:
         -> UPDATE code_sessions.source_code, version++
         -> INSERT code_snapshots (save history)
-      -> cleanupSnapshots() -- delete old snapshots beyond retention limit
+      -> cleanupSnapshots() — keep latest 50
     -> Return 200 { session_id, status, version }
 ```
 
-### 2.3 Execute Code
+### 2.5 Execute Code
 
 ```
 Client -> POST /api/v1/code-sessions/:session_id/run
+  -> authGuard
   -> executionController.run()
     -> executionService.submitExecution()
-      -> getValidSession() -- ownership, active, not expired
-      -> checkRateLimit() -- Redis counter, max N/min
-      -> checkCooldown() -- if 3 consecutive timeouts -> block 60s
-      -> INSERT code_snapshots (snapshot current code)
-      -> generateIdempotencyKey(session_id + snapshot_id + user_id)
-      -> Check idempotency_key already exists? -> return existing execution
-      -> TRANSACTION:
-        -> INSERT executions (status=QUEUED)
-        -> INSERT execution_logs (NULL -> QUEUED)
-      -> executionQueue.add() -- push job to BullMQ (only execution_id)
-      -> incrementRateLimit() -- increment counter in Redis
+      -> getValidSession() — ownership, active, not expired
+      -> checkRateLimit() — Redis counter, max N/min
+      -> checkCooldown() — 3 consecutive timeouts → block 60s
+      -> Snapshot current code, generate idempotency key
+      -> TRANSACTION: INSERT execution (status=QUEUED) + log
+      -> Enqueue job to BullMQ (payload = execution_id only)
     -> Return 202 { execution_id, status: "QUEUED" }
 ```
 
-### 2.4 Worker Processing
+### 2.6 Submit for Grading (Study Mode)
 
 ```
-BullMQ dequeues job
-  -> executionWorker.processJob()
-    -> Fetch execution from DB (include snapshot, language, session)
-    -> Verify status === QUEUED
-    -> Atomic claim: UPDATE WHERE status='QUEUED' -> status='RUNNING'
-      -> affected_rows === 0? Skip (another worker already claimed)
-    -> INSERT execution_logs (QUEUED -> RUNNING)
-    -> sandboxService.execute()
-      -> Create temp directory /tmp/sandbox/{uuid}
-      -> Write source code to file
-      -> Spawn process with timeout + output limit
-      -> Capture stdout/stderr
-      -> SIGKILL on timeout (not SIGTERM -- cannot be trapped)
-      -> Sanitize output (strip ANSI, control chars, truncate)
-      -> Cleanup temp directory
-    -> UPDATE executions (status, stdout, stderr, exit_code, timing)
-    -> INSERT execution_logs (RUNNING -> COMPLETED/FAILED/TIMEOUT)
-    -> Track timeout streak or reset streak
-```
-
-### 2.5 Client Polls Result
-
-```
-Client -> GET /api/v1/executions/:execution_id (poll every 1-2s)
-  -> executionController.getResult()
-    -> executionService.getExecution()
-      -> Check Redis cache first (terminal results cached 5 min)
-      -> Cache miss: query PostgreSQL (SELECT execution + logs)
-      -> If COMPLETED/FAILED/TIMEOUT -> include stdout, stderr, timing
-      -> Cache terminal result in Redis for subsequent polls
-      -> Include lifecycle logs for transparency
-    -> Return execution result
+Client -> POST /api/v1/lessons/:lesson_id/submissions
+  -> authGuard
+  -> submissionService.submit()
+    -> Fetch lesson + test cases
+    -> INSERT submission (status=PENDING)
+    -> For each test case:
+      -> Run code via sandboxService
+      -> Compare output with expected
+    -> UPDATE submission (PASSED/FAILED + results JSON)
+    -> Auto-update lesson_progress
+  -> Return { submission_id, status, results }
 ```
 
 ---
@@ -177,37 +184,23 @@ Client -> GET /api/v1/executions/:execution_id (poll every 1-2s)
 
 ### `src/config/env.ts`
 
-**Purpose:** Validate all environment variables at app start. If missing or wrong type -> crash immediately instead of runtime failure.
+Validates all environment variables at app start using Zod. Crash-early on missing/invalid config.
 
-| Function/Export | Role |
+| Export | Role |
 |---|---|
-| `envSchema` | Zod schema defining all env vars with type + default values |
-| `config` | Object containing all validated config. Import from here, never read `process.env` directly |
-
-**Rationale:** Crash-early is better than debugging runtime errors. Zod provides type-safe config.
+| `config` | Validated config object. Includes: `DATABASE_URL`, `REDIS_URL`, `PORT`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN_DAYS`, `SESSION_TTL_HOURS`, `MAX_EXECUTIONS_PER_MINUTE`, `WORKER_CONCURRENCY` |
 
 ### `src/config/database.ts`
 
-**Purpose:** Prisma client singleton. Prevents creating multiple connection pools during development (hot reload).
-
-| Export | Role |
-|---|---|
-| `prisma` | Single PrismaClient instance. Uses global singleton pattern |
+Prisma client singleton. Prevents multiple connection pools during hot reload.
 
 ### `src/config/redis.ts`
 
-**Purpose:** Redis connection + BullMQ queue creation.
-
 | Export | Role |
 |---|---|
-| `redisConnection` | Config object for BullMQ workers (requires `maxRetriesPerRequest: null`) |
-| `redis` | IORedis instance for rate limiting, cooldown tracking, result caching |
-| `executionQueue` | BullMQ Queue instance -- producer side. Enqueue jobs here |
-
-**Important queue config:**
-- `removeOnComplete: { age: 3600, count: 1000 }` -- Keep 1000 completed jobs or 1 hour, then Redis auto-cleans
-- `removeOnFail: { age: 86400, count: 5000 }` -- Keep failed jobs 24h for debugging
-- `backoff: exponential, delay: 2000` -- Retry after 2s, 4s, 8s...
+| `redisConnection` | Config object for BullMQ workers |
+| `redis` | IORedis instance for rate limiting, cooldown, caching |
+| `executionQueue` | BullMQ Queue instance (producer side) |
 
 ---
 
@@ -215,17 +208,24 @@ Client -> GET /api/v1/executions/:execution_id (poll every 1-2s)
 
 ### `src/types/schemas.ts`
 
-**Purpose:** Zod schemas for all request inputs. Validation happens at controller layer.
+All Zod schemas for request validation. Key schemas:
 
-| Schema | Used In | Validation Rules |
+| Schema | Endpoint | Key Fields |
 |---|---|---|
-| `createSessionSchema` | POST /code-sessions | simulation_id: UUID, user_id: UUID, language: string 1-20 chars, template_code: max 50KB |
-| `updateSessionSchema` | PATCH /code-sessions/:id | source_code: max 50KB, version: positive integer |
-| `runCodeSchema` | POST /code-sessions/:id/run | user_id: UUID |
-| `sessionParamsSchema` | URL params | session_id: UUID |
-| `executionParamsSchema` | URL params | execution_id: UUID |
-
-**Why Zod over Joi/Yup:** Type inference (`z.infer<typeof schema>`) generates TypeScript types automatically.
+| `registerSchema` | POST /auth/register | email, password (min 6), display_name |
+| `loginSchema` | POST /auth/login | email, password |
+| `deviceLoginSchema` | POST /auth/device-login | device_id |
+| `refreshTokenSchema` | POST /auth/refresh | refresh_token |
+| `updateProfileSchema` | PATCH /users/me | display_name?, avatar_url? |
+| `updateSettingsSchema` | PATCH /users/me/settings | default_language?, editor_theme?, font_size?, auto_save?, preferred_mode? |
+| `createSessionSchema` | POST /code-sessions | language, title?, mode?, template_code?, lesson_id? |
+| `updateSessionSchema` | PATCH /code-sessions/:id | source_code (max 50KB), version (positive int) |
+| `listSessionsSchema` | GET /code-sessions | page?, limit?, mode? |
+| `submitCodeSchema` | POST /lessons/:id/submissions | source_code (max 50KB), language |
+| `createLangPackSchema` | POST /admin/language-packs | code, name, description?, version?, is_free? |
+| `createLessonPackSchema` | POST /admin/lesson-packs | language_pack_id, title, description?, difficulty? |
+| `createLessonSchema` | POST /admin/lessons | lesson_pack_id, title, instructions, type?, difficulty? |
+| `createTestCaseSchema` | POST /admin/lessons/:id/test-cases | input?, expected, is_public?, is_hidden?, order_index? |
 
 ---
 
@@ -233,104 +233,170 @@ Client -> GET /api/v1/executions/:execution_id (poll every 1-2s)
 
 ### `src/utils/helpers.ts`
 
-| Function | Purpose | Details |
-|---|---|---|
-| `generateIdempotencyKey()` | Create SHA-256 hash from session_id + snapshot_id + user_id | Prevents duplicate executions. Same code + same user = same key -> return existing execution |
-| `sanitizeOutput()` | Clean stdout/stderr before returning to client | Strip ANSI escape codes (prevent terminal injection), strip control characters (prevent XSS), truncate to max bytes |
-| `AppError` | Custom error class with HTTP status code | Allows services to throw errors that controllers know how to map to status codes |
+| Function | Purpose |
+|---|---|
+| `generateIdempotencyKey()` | SHA-256 hash from session_id + snapshot_id + user_id. Prevents duplicate executions |
+| `sanitizeOutput()` | Strip ANSI escape codes + control characters, truncate to max bytes |
+| `AppError` | Custom error class with HTTP status code + error code |
 
 ---
 
-## 6. Services (Business Logic)
+## 6. Middleware
 
-### `src/services/sessionService.ts` -- SessionService
+### `src/middlewares/authGuard.ts`
 
-**Purpose:** Manage the lifecycle of coding sessions.
+JWT authentication middleware for Fastify.
 
-| Method | Role | Core Logic |
+| Export | Role |
+|---|---|
+| `authGuard` | Fastify preHandler. Extracts Bearer token → `jwt.verify()` → attaches `request.currentUser = { userId, role }`. Throws 401 on invalid/missing token |
+| `adminGuard` | Fastify preHandler. Checks `request.currentUser.role === 'ADMIN'`. Throws 403 if not admin |
+| `getCurrentUserId()` | Helper to extract userId from verified request. Throws 401 if not authenticated |
+
+### `src/middlewares/errorHandler.ts`
+
+Maps all error types to standardized HTTP responses:
+
+| Error Type | HTTP Status | Response |
 |---|---|---|
-| `create(input)` | Create new session | Validate language active -> calculate TTL -> INSERT |
-| `autosave(sessionId, input, userId)` | Save code + create snapshot | Ownership check -> version check (optimistic lock) -> TRANSACTION(update + snapshot) -> cleanup old |
-| `getById(sessionId)` | Read session | Simple SELECT + 404 if not found |
-| `getValidSession(sessionId, userId)` | **Central auth gate** | Checks: exists -> ownership -> status ACTIVE -> not expired. All write operations must pass through here |
-| `cleanupSnapshots(sessionId)` | Delete old snapshots | Keep N most recent snapshots (configurable), delete the rest |
-
-**Optimistic Locking:** Client sends current `version`. If server has a different version (someone else saved) -> reject 409 Conflict. Prevents race conditions with multiple tabs/devices.
-
-### `src/services/executionService.ts` -- ExecutionService
-
-**Purpose:** Manage submission, rate limiting, result caching, and polling.
-
-| Method | Role | Core Logic |
-|---|---|---|
-| `submitExecution(sessionId, userId)` | Submit code for execution | Full pipeline: validate -> rate limit -> cooldown -> snapshot -> idempotency -> enqueue |
-| `getExecution(executionId)` | Poll result with caching | Check Redis cache first -> cache miss: query DB -> cache terminal results (5 min TTL) |
-| `listBySession(sessionId, limit)` | Execution history | Recent 20 executions for a session |
-| `checkRateLimit(userId)` | Redis sliding window | Max N executions/min. Key: `rate:exec:{userId}`, TTL 60s |
-| `incrementRateLimit(userId)` | Increment counter | INCR + EXPIRE atomic via Redis |
-| `checkCooldown(userId)` | Anti-abuse | If `cooldown:{userId}` exists and not expired -> reject 429 |
-| `trackTimeout(userId)` | Count consecutive timeouts | Key: `timeout:streak:{userId}`. If streak >= 3 -> set cooldown 60s |
-| `resetTimeoutStreak(userId)` | Reset streak | Delete key on successful execution |
-
-**Result Caching:** Terminal execution results (COMPLETED/FAILED/TIMEOUT) are cached in Redis with key `exec:result:{executionId}` and a 5-minute TTL. Non-terminal states (QUEUED/RUNNING) are never cached to ensure fresh polling. This read-through cache pattern significantly reduces DB load during client polling.
-
-**Why job payload only contains execution_id:** Security. If Redis is compromised, attacker only sees UUIDs, not source code. Worker fetches code from DB.
-
-### `src/services/sandboxService.ts` -- SandboxService
-
-**Purpose:** Execute code in an isolated environment.
-
-| Method | Role | Core Logic |
-|---|---|---|
-| `execute(sourceCode, language)` | Entry point for code execution | Create temp dir -> write file -> spawn process -> capture output -> cleanup |
-| `getCommand(language, filePath)` | Resolve runtime command | python -> `python3 -u`, javascript -> `node --max-old-space-size=256`, etc. |
-| `runProcess(command, args, opts)` | Spawn + monitor process | Hard timeout SIGKILL, capture stdout/stderr with size limit, track timing |
-| `cleanup(dir)` | Delete temp directory | rmSync recursive, always runs (finally block) |
-
-**SIGKILL vs SIGTERM:** Uses SIGKILL because user code can trap SIGTERM (Python: `signal.signal(SIGTERM, handler)`). SIGKILL cannot be trapped -> guaranteed kill.
-
-**Production upgrade path:** Replace `spawn()` with Docker container + nsjail:
-- `docker run --network=none --read-only --memory=256m --cpus=0.5 --pids-limit=10 sandbox-python:3.12`
-- nsjail adds syscall whitelist, user namespace isolation
+| `ZodError` | 400 | `{ error: "VALIDATION_ERROR", details: [...] }` |
+| `AppError` | Custom | `{ error: code, message }` |
+| Fastify validation | 400 | `{ error: "VALIDATION_ERROR", details: [...] }` |
+| Unknown | 500 | `{ error: "INTERNAL_ERROR" }` — never leaks stack traces |
 
 ---
 
-## 7. Controllers (HTTP Layer)
+## 7. Services (Business Logic)
+
+### `src/services/authService.ts` — AuthService
+
+| Method | Role |
+|---|---|
+| `register(input)` | Check email unique → bcrypt hash (cost 12) → create user + settings → generate tokens |
+| `login(input)` | Find by email → bcrypt compare → update last_login → generate tokens |
+| `deviceLogin(input)` | Find or create anonymous user by device_id → generate tokens |
+| `refreshToken(token)` | Validate refresh token → revoke old → issue new pair (rotation) |
+| `logout(userId)` | Revoke all user's refresh tokens |
+| `getMe(userId)` | Return user profile with settings |
+| `updateProfile(userId, input)` | Update display_name, avatar_url |
+
+### `src/services/userSettingsService.ts` — UserSettingsService
+
+| Method | Role |
+|---|---|
+| `get(userId)` | Return user settings or defaults |
+| `update(userId, input)` | Upsert settings (default_language, editor_theme, font_size, auto_save, preferred_mode) |
+
+### `src/services/languagePackService.ts` — LanguagePackService
+
+| Method | Role |
+|---|---|
+| `list()` | List all published language packs |
+| `getById(id)` | Get pack details |
+| `unlock(packId, userId)` | Upsert user_language_pack with is_unlocked=true |
+| `install(packId, userId)` | Set is_installed=true + installed_at |
+| `getUserPacks(userId)` | List user's unlocked/installed packs |
+| `uninstall(packId, userId)` | Set is_installed=false |
+| `getManifest(packId)` | Return version + manifest JSON |
+
+### `src/services/lessonPackService.ts` — LessonPackService
+
+| Method | Role |
+|---|---|
+| `list(query)` | List published packs with filters (language, difficulty, free_only) + pagination |
+| `getById(id)` | Get pack details with language info |
+| `unlock(packId, userId)` | Upsert user_lesson_pack with is_unlocked=true |
+| `getUserPacks(userId)` | List user's unlocked packs |
+| `getManifest(packId)` | Return version + manifest + total_lessons |
+| `getLessons(packId)` | List published lessons in pack (ordered) |
+| `getLesson(lessonId)` | Get full lesson details |
+
+### `src/services/submissionService.ts` — SubmissionService
+
+| Method | Role |
+|---|---|
+| `submit(lessonId, userId, input)` | Create submission → run code against test cases → grade → update progress |
+| `getById(submissionId)` | Get submission details |
+| `listByLesson(lessonId, userId)` | List user's submissions for a lesson |
+| `getResult(submissionId)` | Get grading results |
+| `recheck(submissionId)` | Re-run submission against current test cases |
+
+### `src/services/progressService.ts` — ProgressService
+
+| Method | Role |
+|---|---|
+| `getOverview(userId)` | Aggregate progress across all lesson packs |
+| `getPackProgress(packId, userId)` | Calculate completion percentage |
+| `getLessonProgress(lessonId, userId)` | Get lesson-level progress |
+| `updateProgress(lessonId, userId, input)` | Update progress status + time_spent |
+| `completeLesson(lessonId, userId)` | Mark lesson COMPLETED |
+| `unlockNext(lessonId, userId)` | Find next lesson by order_index → create NOT_STARTED progress |
+
+### `src/services/adminService.ts` — AdminService
+
+| Method | Role |
+|---|---|
+| `createLanguagePack(input)` | Create unpublished language pack |
+| `updateLanguagePack(id, input)` | Update pack fields |
+| `publishLanguagePack(id)` | Set is_published=true |
+| `createLessonPack(input)` | Create unpublished lesson pack |
+| `updateLessonPack(id, input)` | Update pack fields |
+| `publishLessonPack(id)` | Count lessons → set total_lessons → publish |
+| `createLesson(input)` | Create lesson in pack |
+| `updateLesson(id, input)` | Update lesson fields |
+| `createTestCase(lessonId, input)` | Create test case for lesson |
+| `updateTestCase(id, input)` | Update test case |
+
+### `src/services/sessionService.ts` — SessionService
+
+| Method | Role |
+|---|---|
+| `create(input, userId)` | Validate language → create session with title, mode (PLAYGROUND/STUDY), optional lessonId |
+| `autosave(sessionId, input, userId)` | Ownership check → version check → TRANSACTION(update + snapshot) → cleanup |
+| `listByUser(userId, query)` | Paginated session list for user |
+| `getById(sessionId)` | Get session with language details |
+| `delete(sessionId, userId)` | Ownership check → set status CLOSED |
+| `getValidSession(sessionId, userId)` | Central auth gate: exists → ownership → active → not expired |
+
+### `src/services/executionService.ts` — ExecutionService
+
+| Method | Role |
+|---|---|
+| `submitExecution(sessionId, userId)` | Full pipeline: validate → rate limit → cooldown → snapshot → idempotency → enqueue |
+| `getExecution(executionId)` | Redis cache check → DB fallback → cache terminal results |
+| `listBySession(sessionId, limit)` | Recent executions for a session |
+| `trackTimeout(userId)` | Count consecutive timeouts → set cooldown if streak ≥ 3 |
+
+### `src/services/sandboxService.ts` — SandboxService
+
+| Method | Role |
+|---|---|
+| `execute(sourceCode, language)` | Create temp dir → write file → spawn process → capture output → cleanup |
+| `getCommand(language, filePath)` | Resolve runtime (python3, node, javac+java, g++) |
+| `runProcess(command, args, opts)` | Spawn with timeout SIGKILL, capture stdout/stderr, track timing |
+
+---
+
+## 8. Controllers (HTTP Layer)
 
 ### `src/controllers/sessionController.ts`
 
 | Method | Route | Role |
 |---|---|---|
-| `create()` | POST /code-sessions | Parse body -> sessionService.create() -> 201 |
-| `autosave()` | PATCH /code-sessions/:id | Parse body + params + header -> sessionService.autosave() |
-| `getById()` | GET /code-sessions/:id | Parse params -> sessionService.getById() -> format response |
-| `extractUserId()` | (private) | Read `x-user-id` header. Production: will come from JWT middleware |
+| `create()` | POST /code-sessions | Parse body → getCurrentUserId() → sessionService.create() → 201 |
+| `autosave()` | PATCH /code-sessions/:id | Parse body + params → sessionService.autosave() |
+| `getById()` | GET /code-sessions/:id | Parse params → sessionService.getById() |
+| `list()` | GET /code-sessions | Parse query → sessionService.listByUser() |
+| `delete()` | DELETE /code-sessions/:id | Parse params → sessionService.delete() |
+| `autosaveEndpoint()` | POST /code-sessions/:id/autosave | Alternative autosave via POST |
 
 ### `src/controllers/executionController.ts`
 
 | Method | Route | Role |
 |---|---|---|
-| `run()` | POST /code-sessions/:id/run | Parse params + header -> executionService.submitExecution() -> 202 |
-| `getResult()` | GET /executions/:id | Parse params -> executionService.getExecution() |
-| `listBySession()` | GET /code-sessions/:id/executions | Parse params -> executionService.listBySession() |
-
-**Controller rules:** No business logic. Only: validate input -> call service -> format output.
-
----
-
-## 8. Middleware
-
-### `src/middlewares/errorHandler.ts`
-
-**Purpose:** Map all error types to standardized HTTP responses.
-
-| Error Type | HTTP Status | Response Format |
-|---|---|---|
-| `ZodError` | 400 | `{ error: "VALIDATION_ERROR", details: [...] }` |
-| Fastify `FST_ERR_VALIDATION` | 400 | `{ error: "VALIDATION_ERROR", details: [...] }` -- from route JSON Schema validation |
-| `AppError` | Custom (400/401/403/404/409/429) | `{ error: code, message }` |
-| Fastify errors (rate limit, payload) | Varies | `{ error: code, message }` |
-| Unknown errors | 500 | `{ error: "INTERNAL_ERROR", message: "An unexpected error occurred" }` -- **never leaks stack traces** |
+| `run()` | POST /code-sessions/:id/run | getCurrentUserId() → executionService.submitExecution() → 202 |
+| `getResult()` | GET /executions/:id | executionService.getExecution() |
+| `listBySession()` | GET /code-sessions/:id/executions | executionService.listBySession() |
 
 ---
 
@@ -338,24 +404,22 @@ Client -> GET /api/v1/executions/:execution_id (poll every 1-2s)
 
 ### `src/routes/index.ts`
 
-**Purpose:** Register all routes on the Fastify instance with OpenAPI schema definitions.
+70+ endpoints organized by feature group. All authenticated routes use `preHandler: [authGuard]`, admin routes additionally use `adminGuard`.
 
-| Route | Method | Controller | OpenAPI Tag |
+| Route Group | # Endpoints | Auth | Description |
 |---|---|---|---|
-| `/health` | GET | Inline (status, uptime) | Health |
-| `/health/worker` | GET | Inline (queue + Redis + DB check) | Health |
-| `/api/v1/code-sessions` | POST | sessionController.create | Sessions |
-| `/api/v1/code-sessions/:session_id` | PATCH | sessionController.autosave | Sessions |
-| `/api/v1/code-sessions/:session_id` | GET | sessionController.getById | Sessions |
-| `/api/v1/code-sessions/:session_id/run` | POST | executionController.run | Executions |
-| `/api/v1/code-sessions/:session_id/executions` | GET | executionController.listBySession | Executions |
-| `/api/v1/executions/:execution_id` | GET | executionController.getResult | Executions |
-
-Each route includes a Fastify JSON Schema definition for request body, params, headers, and response types. These schemas are used by `@fastify/swagger` to auto-generate the OpenAPI 3.0.3 specification.
-
-**API versioning:** `/api/v1/` prefix for backward compatibility when adding v2.
-
-**Worker health check (`/health/worker`):** Checks queue job counts (waiting/active/completed/failed), Redis connectivity (`PING`), and PostgreSQL connectivity (`SELECT 1`). Returns `"ok"` or `"degraded"` with error details.
+| Health | 2 | No | `/health`, `/health/worker` |
+| Auth | 6 | Mixed | Register, login, device-login, refresh, logout, me |
+| User Settings | 3 | Yes | Profile update, get/update settings |
+| Language Packs | 7 | Yes | List, detail, unlock, install, uninstall, manifest |
+| Lesson Packs | 7 | Yes | List, detail, unlock, user packs, manifest, lessons |
+| Progress | 6 | Yes | Overview, pack progress, lesson progress, complete, unlock-next |
+| Code Sessions | 7 | Yes | CRUD + autosave + list |
+| Executions | 3 | Yes | Run, get result, list by session |
+| Submissions | 5 | Yes | Submit, get, list, recheck, result |
+| Tests & Content | 4 | Yes | Test summary, public tests, run sample, downloads |
+| Admin | 10 | Admin | CRUD for language packs, lesson packs, lessons, test cases |
+| System | 3 | No | Status, supported languages, runtime config |
 
 ---
 
@@ -363,23 +427,15 @@ Each route includes a Fastify JSON Schema definition for request body, params, h
 
 ### `src/workers/executionWorker.ts`
 
-**Purpose:** BullMQ consumer process -- runs separately from the API server.
+BullMQ consumer process — runs separately from the API server.
 
 | Component | Role |
 |---|---|
-| `WORKER_ID` | Short UUID, attached to all logs + DB records for tracing which worker handled which job |
-| `processJob()` | Main handler: fetch execution -> claim (atomic) -> sandbox.execute() -> update result |
-| `worker` (BullMQ Worker) | Consumer instance, concurrency configurable via `WORKER_CONCURRENCY` env var |
-| Graceful shutdown | SIGTERM/SIGINT -> wait for current jobs to finish -> close connections |
+| `WORKER_ID` | Short UUID for tracing which worker handled which job |
+| `processJob()` | Fetch execution → atomic claim (WHERE status='QUEUED') → sandbox.execute() → update result |
+| Graceful shutdown | SIGTERM/SIGINT → wait for current jobs → close connections |
 
-**Atomic claim pattern:**
-```sql
-UPDATE executions SET status='RUNNING', worker_id='...'
-WHERE id='{id}' AND status='QUEUED'
-```
-If `affected_rows = 0` -> another worker already claimed -> skip. Prevents duplicate processing with multiple workers.
-
-**Retry logic:** BullMQ auto-retries if `processJob()` throws an error. Config: max 3 attempts, exponential backoff (2s, 4s, 8s). After max retries -> job moves to failed queue.
+**Atomic claim:** `UPDATE WHERE status='QUEUED' → RUNNING`. If affected_rows=0, another worker claimed it → skip.
 
 ---
 
@@ -389,174 +445,92 @@ If `affected_rows = 0` -> another worker already claimed -> skip. Prevents dupli
 
 | Function | Role |
 |---|---|
-| `buildApp()` | Create Fastify instance + register plugins + routes. Separated for testability |
-| `start()` | Connect DB -> start server -> setup graceful shutdown |
+| `buildApp()` | Create Fastify instance + register plugins + routes |
+| `start()` | Connect DB → start server → setup graceful shutdown |
 
-**Plugins registered (in order):**
-1. `@fastify/cors` -- Production: only allow `edtronaut.ai` domains
-2. `@fastify/helmet` -- Security headers (X-Frame-Options, X-Content-Type-Options, etc.)
-3. `@fastify/swagger` -- OpenAPI 3.0.3 spec generation from route schemas
-4. `@fastify/swagger-ui` -- Interactive API docs at `/docs`
-5. `@fastify/rate-limit` -- In-memory rate limit (use Redis store in production with multiple API instances)
-6. `bodyLimit: 1MB` -- Reject oversized code uploads
+**Plugins (in order):**
+1. `@fastify/cors` — Allow DELETE, Authorization header
+2. `@fastify/helmet` — Security headers
+3. `@fastify/swagger` — OpenAPI 3.0.3 spec with tags for all route groups
+4. `@fastify/swagger-ui` — Interactive docs at `/docs`
+5. `@fastify/rate-limit` — Request-level rate limiting
+6. `bodyLimit: 1MB`
 
 ---
 
 ## 12. Database Schema
 
-### Normalized 3NF Design
+### 17 Tables + 6 Enums
 
-```
-supported_languages (1) <---- (N) code_sessions (1) <---- (N) code_snapshots
-                    (1) <---- (N) executions    (1) <---- (N) execution_logs
-                                  code_sessions (1) <---- (N) executions
-                                  code_snapshots(1) <---- (N) executions
-```
+**Core Auth:**
+- `users` — email, password_hash, display_name, role (USER/ADMIN), is_anonymous, device_id
+- `refresh_tokens` — token rotation with expiry + revocation
+- `user_settings` — per-user preferences (theme, font, language, mode)
 
-### Table Details
+**Content System:**
+- `language_packs` — code, name, version, is_builtin, is_free, is_published, manifest (JSONB)
+- `user_language_packs` — unlock/install state per user
+- `lesson_packs` — title, difficulty, total_lessons, is_free, is_published
+- `user_lesson_packs` — unlock state per user
+- `lessons` — title, instructions, starter_code, expected_output, type, difficulty, order_index
+- `test_cases` — input, expected output, is_public, is_hidden
 
-**`supported_languages`** -- Reference table
-- Centrally manages supported languages. Adding Go, Rust = just INSERT 1 row.
-- `docker_image` -- worker knows which container to use (production)
-- `is_active` -- disable a language without deleting data
-- **3NF:** No transitive dependency. All other tables reference via FK `language_id`
+**Learning:**
+- `submissions` — source_code, language, status (PENDING→PASSED/FAILED), results (JSONB)
+- `lesson_progress` — status (NOT_STARTED→IN_PROGRESS→COMPLETED), best_score, attempts
 
-**`code_sessions`** -- Core entity
-- `version` -- optimistic locking for autosave
-- `expires_at` -- session TTL, auto-expire after 4h
-- `source_code` -- current (latest) code; snapshot stores history separately
-
-**`code_snapshots`** -- Autosave history (separated from session for 3NF)
-- Each autosave creates 1 snapshot
-- `UNIQUE(session_id, version)` -- no duplicates
-- Retention: keep 50 most recent, delete older
-- **Why separate:** Session only holds latest code. History is a separate concern. Execution points to a specific snapshot -> results map exactly to the code that ran.
-
-**`executions`** -- Execution records
-- `snapshot_id` FK -- knows exactly which code was executed
-- `idempotency_key` UNIQUE -- prevents duplicate executions
-- `worker_id` -- traces which worker handled the job
-- `retry_count` / `max_retries` -- retry tracking
-
-**`execution_logs`** -- State transition audit trail
-- `from_status` -> `to_status`: records state transitions
-- `metadata` JSONB: error details, timing, worker info
-- Used for debugging, monitoring, and auditing
+**Code Execution:**
+- `supported_languages` — name, version, docker_image, file_extension, timeout, memory limits
+- `code_sessions` — title, mode (PLAYGROUND/STUDY), source_code, version (optimistic lock), expires_at
+- `code_snapshots` — autosave history (50 per session)
+- `executions` — status, stdout, stderr, exit_code, timing, idempotency_key
+- `execution_logs` — state transition audit trail with JSONB metadata
 
 ---
 
 ## 13. Docker & Infrastructure
-
-### `Dockerfile`
-
-Multi-stage build using `node:20-slim` (Debian-based) for OpenSSL 3.x compatibility with Prisma:
-1. **Builder stage:** Install `openssl` + deps -> generate Prisma -> compile TypeScript
-2. **Production stage:** Copy only `dist/` + `node_modules/` + `prisma/` + `scripts/`
-   - `tini` as PID 1 -- handles signals properly, reaps zombie processes
-   - Non-root user `appuser` (uid 1001)
-   - Python3 installed for sandbox execution
-   - `openssl` + `ca-certificates` for Prisma engine compatibility
-
-### `scripts/start-all.sh`
-
-Combined startup script for running API server + Worker in a single container (cost-effective for free-tier deployment):
-1. Runs `prisma migrate deploy` (database migrations)
-2. Seeds supported languages via inline Node.js script (idempotent upsert)
-3. Starts API server (`node dist/server.js`) in background
-4. Starts Worker (`node dist/workers/executionWorker.js`) in background
-5. Handles graceful shutdown via SIGTERM/SIGINT trap
 
 ### `docker-compose.yml`
 
 | Service | Port | Role |
 |---|---|---|
 | `postgres` | 5432 | Database, healthcheck via `pg_isready` |
-| `redis` | 6379 | Queue + rate limiting + result caching, maxmemory 256MB, LRU eviction |
-| `api` | 3000 | Fastify server, runs migrate + seed before start |
-| `worker` | -- | BullMQ consumer, no exposed port |
+| `redis` | 6379 | Queue + rate limiting + caching, maxmemory 256MB |
+| `api` | 3000 | Fastify server |
+| `worker` | — | BullMQ consumer |
 
-**Startup order:** postgres healthy -> redis healthy -> api (migrate + seed + serve) + worker
+### `Dockerfile`
+
+Multi-stage build using `node:20-slim`:
+1. **Builder:** Install deps → generate Prisma → compile TypeScript
+2. **Production:** Copy dist + node_modules + prisma. `tini` as PID 1, non-root user
 
 ---
 
 ## 14. Security Architecture
 
-### Layer 1 -- Network (Nginx/API Gateway)
-- Request body size: 1MB max
-- Rate limit: configurable req/min per IP
-- CORS: only edtronaut.ai domains in production
+### Layer 1 — Authentication
+- JWT Bearer tokens (HS256, 15min expiry)
+- Refresh token rotation (revoke on use)
+- bcrypt password hashing (cost 12)
+- Anonymous device-based login
+- Admin role guard for content management
+
+### Layer 2 — Application
+- Zod validation on all inputs; source_code max 50KB
+- Ownership checks: users can only access their own data
+- Optimistic locking for concurrent autosave
+- Session expiry (4h TTL)
+
+### Layer 3 — Execution Safety
+- Rate limit: 10 executions/min per user (Redis counter)
+- Cooldown: 3 consecutive timeouts → block 60s
+- SIGKILL on timeout (cannot be trapped)
+- stdout/stderr truncated to 1MB
+- Job payload = ID only (source code never in Redis)
+
+### Layer 4 — Network
+- Fastify bodyLimit 1MB
 - Helmet security headers
-
-### Layer 2 -- Application
-- **Input validation:** Zod schemas on all inputs; source_code max 50KB
-- **Fastify schema validation:** JSON Schema on all routes for params, body, headers
-- **Ownership check:** `getValidSession()` verifies `session.user_id === request.user_id` -- cannot access another user's session
-- **Session expiry:** TTL 4h, automatically EXPIRED
-- **Optimistic locking:** Version check prevents race conditions
-- **Rate limiting:** Redis counter, max 10 executions/min per user
-- **Cooldown:** 3 consecutive timeouts -> block 60s
-
-### Layer 3 -- Queue
-- **Job payload = execution_id only** -- source code never sent through Redis
-- **Atomic claim:** `UPDATE WHERE status='QUEUED'` -- prevents duplicate processing
-- **Job TTL:** 5 minutes in queue, then auto-expires
-
-### Layer 4 -- Sandbox (Production)
-- No network access (`--network=none`)
-- Read-only filesystem (write only /tmp, 10MB limit)
-- PID limit = 10 (prevents fork bombs)
-- Syscall whitelist (~40 syscalls)
-- SIGKILL timeout (cannot be trapped)
-- Stdout/stderr truncate 1MB
-- Unprivileged user (uid 65534)
-- Separate user namespace
-
-### Layer 5 -- Data
-- Output sanitized (strip ANSI, control characters)
-- Source code not logged to application logs
-- Error responses never leak stack traces or internals
-
----
-
-## 15. Scalability Considerations
-
-### Horizontal Scaling
-
-| Component | Scale Method | Bottleneck |
-|---|---|---|
-| API servers | Load balancer (Nginx/ALB) + add instances | Stateless, scales linearly |
-| Workers | Add worker instances | Container spawn time -> pre-warm pool |
-| PostgreSQL | Read replicas for GET requests | Write throughput -> PgBouncer |
-| Redis | Cluster mode for high throughput | Memory -> eviction policy |
-
-### Performance Estimates
-
-- API latency: ~5-20ms (create/autosave/poll)
-- Execution latency: 100ms-10s (depends on code)
-- Queue throughput: ~1000 jobs/s per Redis instance
-- Autosave frequency: debounce 3s client-side -> ~20 writes/min/session
-
-### Potential Bottlenecks
-
-1. **Container cold start** -> Mitigate: pre-warmed pool
-2. **DB writes during peak** -> Mitigate: PgBouncer, batch snapshots
-3. **Redis memory** -> Mitigate: TTL on all keys, LRU eviction
-4. **Large stdout** -> Mitigate: truncate 1MB, stream instead of buffer
-
----
-
-## 16. Trade-offs
-
-| Decision | Optimized For | Trade-off |
-|---|---|---|
-| **Polling instead of WebSocket** | Simplicity, stateless API, easy to scale | 1-2s delay, extra bandwidth. Upgrade: SSE/WebSocket |
-| **Snapshot per autosave** | Audit trail, execution accuracy | Storage cost. Mitigate: retention policy 50 snapshots |
-| **Job payload = ID only** | Security (code not exposed via Redis) | Extra DB query/job. Acceptable cost |
-| **SIGKILL instead of SIGTERM** | Guaranteed kill, user cannot trap | No graceful shutdown. Acceptable for sandbox |
-| **Optimistic locking (version)** | Prevents race condition on autosave | Client must handle 409 retry. Trade-off UX vs correctness |
-| **Fastify over Express** | Performance (~2x throughput) | Smaller ecosystem than Express. Acceptable |
-| **BullMQ over RabbitMQ** | Node.js native, less infrastructure | Depends on Redis stability. Mitigate: Redis persistence |
-| **PostgreSQL over MongoDB** | ACID, strong schema, FK integrity | Less flexible for unstructured. Mitigate: JSONB columns |
-| **Separate API + Worker process** | Independent scaling, fault isolation | More deployment complexity. Mitigate: docker-compose |
-| **3NF database** | No data duplication, clean queries | More JOINs. Negligible performance cost |
-| **Redis result caching** | Reduces DB load during polling | Slightly stale data (5 min TTL). Only for terminal states |
+- CORS configuration
+- Request-level rate limiting

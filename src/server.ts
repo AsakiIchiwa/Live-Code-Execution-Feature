@@ -28,8 +28,8 @@ async function buildApp() {
     origin: config.NODE_ENV === 'production'
       ? ['https://edtronaut.ai', 'https://job-simulations.edtronaut.ai']
       : true,
-    methods: ['GET', 'POST', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'x-user-id', 'x-request-id'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-request-id'],
   });
 
   await app.register(helmet, {
@@ -51,8 +51,18 @@ async function buildApp() {
       ],
       tags: [
         { name: 'Health', description: 'Health check endpoint' },
+        { name: 'Auth', description: 'Authentication' },
+        { name: 'Settings', description: 'User settings' },
+        { name: 'Language Packs', description: 'Language pack management' },
+        { name: 'Lesson Packs', description: 'Lesson pack management' },
+        { name: 'Progress', description: 'Learning progress tracking' },
         { name: 'Sessions', description: 'Code session management' },
         { name: 'Executions', description: 'Code execution and results' },
+        { name: 'Submissions', description: 'Lesson submissions and grading' },
+        { name: 'Tests', description: 'Test case evaluation' },
+        { name: 'Content', description: 'Content delivery' },
+        { name: 'Admin', description: 'Admin endpoints' },
+        { name: 'System', description: 'System operations' },
       ],
     },
   });

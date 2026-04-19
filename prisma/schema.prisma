@@ -7,7 +7,285 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── Reference Table: Supported Languages ───
+// ─────────────────────────────────────────────
+// AUTH & USER
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model User {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String?  @unique @db.VarChar(255)
+  passwordHash  String?  @map("password_hash") @db.VarChar(255)
+  displayName   String   @default("Coder") @map("display_name") @db.VarChar(100)
+  avatarUrl     String?  @map("avatar_url") @db.VarChar(500)
+  role          UserRole @default(USER)
+  isAnonymous   Boolean  @default(false) @map("is_anonymous")
+  deviceId      String?  @unique @map("device_id") @db.VarChar(255)
+  googleId      String?  @unique @map("google_id") @db.VarChar(255)
+  lastLoginAt   DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  settings          UserSettings?
+  sessions          CodeSession[]
+  refreshTokens     RefreshToken[]
+  userLanguagePacks UserLanguagePack[]
+  userLessonPacks   UserLessonPack[]
+  lessonProgress    LessonProgress[]
+  submissions       Submission[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  token     String   @unique @db.VarChar(500)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_refresh_token_user")
+  @@index([token], name: "idx_refresh_token_token")
+  @@map("refresh_tokens")
+}
+
+model UserSettings {
+  id                String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String  @unique @map("user_id") @db.Uuid
+  defaultLanguage   String  @default("java") @map("default_language") @db.VarChar(20)
+  editorTheme       String  @default("dark") @map("editor_theme") @db.VarChar(30)
+  fontSize          Int     @default(14) @map("font_size")
+  autoSave          Boolean @default(true) @map("auto_save")
+  preferredMode     String  @default("playground") @map("preferred_mode") @db.VarChar(20)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+// ─────────────────────────────────────────────
+// LANGUAGE PACKS
+// ─────────────────────────────────────────────
+
+model LanguagePack {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code              String   @unique @db.VarChar(20)
+  name              String   @db.VarChar(50)
+  description       String   @default("") @db.Text
+  version           String   @default("1.0.0") @db.VarChar(20)
+  iconUrl           String?  @map("icon_url") @db.VarChar(500)
+  size              Int      @default(0) // bytes
+  isBuiltin         Boolean  @default(false) @map("is_builtin")
+  isFree            Boolean  @default(true) @map("is_free")
+  isPublished       Boolean  @default(false) @map("is_published")
+  supportedFeatures Json     @default("[]") @map("supported_features") @db.JsonB
+  manifest          Json     @default("{}") @db.JsonB
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  userLanguagePacks UserLanguagePack[]
+  lessonPacks       LessonPack[]
+
+  @@map("language_packs")
+}
+
+model UserLanguagePack {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  languagePackId String    @map("language_pack_id") @db.Uuid
+  isUnlocked     Boolean   @default(false) @map("is_unlocked")
+  isInstalled    Boolean   @default(false) @map("is_installed")
+  installedAt    DateTime? @map("installed_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  languagePack LanguagePack @relation(fields: [languagePackId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, languagePackId])
+  @@map("user_language_packs")
+}
+
+// ─────────────────────────────────────────────
+// LESSON PACKS & LESSONS
+// ─────────────────────────────────────────────
+
+enum Difficulty {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+model LessonPack {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  languagePackId String     @map("language_pack_id") @db.Uuid
+  title          String     @db.VarChar(200)
+  description    String     @default("") @db.Text
+  difficulty     Difficulty @default(BEGINNER)
+  version        String     @default("1.0.0") @db.VarChar(20)
+  orderIndex     Int        @default(0) @map("order_index")
+  isFree         Boolean    @default(true) @map("is_free")
+  isPublished    Boolean    @default(false) @map("is_published")
+  iconUrl        String?    @map("icon_url") @db.VarChar(500)
+  manifest       Json       @default("{}") @db.JsonB
+  estimatedTime  Int        @default(0) @map("estimated_time") // minutes
+  totalLessons   Int        @default(0) @map("total_lessons")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  languagePack    LanguagePack     @relation(fields: [languagePackId], references: [id])
+  lessons         Lesson[]
+  userLessonPacks UserLessonPack[]
+
+  @@index([languagePackId], name: "idx_lesson_pack_language")
+  @@map("lesson_packs")
+}
+
+model UserLessonPack {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  lessonPackId String   @map("lesson_pack_id") @db.Uuid
+  isUnlocked   Boolean  @default(false) @map("is_unlocked")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonPack LessonPack @relation(fields: [lessonPackId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonPackId])
+  @@map("user_lesson_packs")
+}
+
+enum LessonType {
+  TUTORIAL
+  EXERCISE
+  CHALLENGE
+  QUIZ
+}
+
+model Lesson {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lessonPackId    String     @map("lesson_pack_id") @db.Uuid
+  title           String     @db.VarChar(200)
+  description     String     @default("") @db.Text
+  instructions    String     @default("") @db.Text
+  starterCode     String     @default("") @map("starter_code") @db.Text
+  expectedOutput  String?    @map("expected_output") @db.Text
+  difficulty      Difficulty @default(BEGINNER)
+  lessonType      LessonType @default(EXERCISE) @map("lesson_type")
+  estimatedTime   Int        @default(10) @map("estimated_time") // minutes
+  orderIndex      Int        @default(0) @map("order_index")
+  isPublished     Boolean    @default(false) @map("is_published")
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  lessonPack     LessonPack       @relation(fields: [lessonPackId], references: [id], onDelete: Cascade)
+  testCases      TestCase[]
+  submissions    Submission[]
+  lessonProgress LessonProgress[]
+
+  @@index([lessonPackId, orderIndex], name: "idx_lesson_pack_order")
+  @@map("lessons")
+}
+
+model TestCase {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lessonId    String  @map("lesson_id") @db.Uuid
+  input       String  @default("") @db.Text
+  expected    String  @db.Text
+  isPublic    Boolean @default(false) @map("is_public")
+  isHidden    Boolean @default(false) @map("is_hidden")
+  orderIndex  Int     @default(0) @map("order_index")
+  description String? @db.VarChar(500)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId], name: "idx_testcase_lesson")
+  @@map("test_cases")
+}
+
+// ─────────────────────────────────────────────
+// SUBMISSIONS & GRADING
+// ─────────────────────────────────────────────
+
+enum SubmissionStatus {
+  PENDING
+  RUNNING
+  PASSED
+  FAILED
+  ERROR
+  TIMEOUT
+}
+
+model Submission {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  lessonId       String           @map("lesson_id") @db.Uuid
+  sessionId      String?          @map("session_id") @db.Uuid
+  sourceCode     String           @map("source_code") @db.Text
+  language       String           @db.VarChar(20)
+  status         SubmissionStatus @default(PENDING)
+  score          Int              @default(0)
+  passedTests    Int              @default(0) @map("passed_tests")
+  totalTests     Int              @default(0) @map("total_tests")
+  feedback       String?          @db.Text
+  compileStatus  String?          @map("compile_status") @db.VarChar(50)
+  runtimeStatus  String?          @map("runtime_status") @db.VarChar(50)
+  executionTimeMs Int?            @map("execution_time_ms")
+  memoryUsedKb   Int?             @map("memory_used_kb")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  completedAt    DateTime?        @map("completed_at") @db.Timestamptz
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([userId, lessonId], name: "idx_submission_user_lesson")
+  @@index([lessonId], name: "idx_submission_lesson")
+  @@map("submissions")
+}
+
+// ─────────────────────────────────────────────
+// PROGRESS TRACKING
+// ─────────────────────────────────────────────
+
+enum ProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+model LessonProgress {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String         @map("user_id") @db.Uuid
+  lessonId     String         @map("lesson_id") @db.Uuid
+  status       ProgressStatus @default(NOT_STARTED)
+  bestScore    Int            @default(0) @map("best_score")
+  attempts     Int            @default(0)
+  completedAt  DateTime?      @map("completed_at") @db.Timestamptz
+  lastActiveAt DateTime?      @map("last_active_at") @db.Timestamptz
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@index([userId], name: "idx_progress_user")
+  @@map("lesson_progress")
+}
+
+// ─────────────────────────────────────────────
+// EXISTING: SUPPORTED LANGUAGES & CODE EXECUTION
+// ─────────────────────────────────────────────
+
 model SupportedLanguage {
   id            Int       @id @default(autoincrement())
   name          String    @unique @db.VarChar(20)
@@ -25,7 +303,11 @@ model SupportedLanguage {
   @@map("supported_languages")
 }
 
-// ─── Core: Code Sessions ───
+enum SessionMode {
+  PLAYGROUND
+  STUDY
+}
+
 enum SessionStatus {
   ACTIVE
   PAUSED
@@ -35,27 +317,31 @@ enum SessionStatus {
 
 model CodeSession {
   id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  simulationId  String        @map("simulation_id") @db.Uuid
+  simulationId  String?       @map("simulation_id") @db.Uuid
   userId        String        @map("user_id") @db.Uuid
   languageId    Int           @map("language_id")
+  title         String        @default("Untitled") @db.VarChar(200)
   templateCode  String        @default("") @map("template_code") @db.Text
   sourceCode    String        @default("") @map("source_code") @db.Text
+  mode          SessionMode   @default(PLAYGROUND)
   status        SessionStatus @default(ACTIVE)
+  lessonId      String?       @map("lesson_id") @db.Uuid
   version       Int           @default(1)
   expiresAt     DateTime?     @map("expires_at") @db.Timestamptz
   createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   language  SupportedLanguage @relation(fields: [languageId], references: [id])
   snapshots CodeSnapshot[]
   executions Execution[]
 
   @@index([userId, status], name: "idx_session_user")
   @@index([simulationId], name: "idx_session_simulation")
+  @@index([userId, mode], name: "idx_session_user_mode")
   @@map("code_sessions")
 }
 
-// ─── Core: Code Snapshots (Autosave History) ───
 model CodeSnapshot {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   sessionId  String   @map("session_id") @db.Uuid
@@ -71,7 +357,6 @@ model CodeSnapshot {
   @@map("code_snapshots")
 }
 
-// ─── Core: Executions ───
 enum ExecutionStatus {
   QUEUED
   RUNNING
@@ -110,7 +395,6 @@ model Execution {
   @@map("executions")
 }
 
-// ─── Observability: Execution Logs ───
 model ExecutionLog {
   id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   executionId String          @map("execution_id") @db.Uuid

@@ -4,34 +4,26 @@ import {
   createSessionSchema,
   updateSessionSchema,
   sessionParamsSchema,
+  listSessionsQuerySchema,
 } from '../types/schemas';
-import { AppError } from '../utils/helpers';
+import { getCurrentUserId } from '../middlewares/authGuard';
 
 export class SessionController {
-  /**
-   * POST /code-sessions
-   */
   async create(request: FastifyRequest, reply: FastifyReply) {
     const body = createSessionSchema.parse(request.body);
-    const result = await sessionService.create(body);
+    const userId = getCurrentUserId(request);
+    const result = await sessionService.create(body, userId);
     return reply.status(201).send(result);
   }
 
-  /**
-   * PATCH /code-sessions/:session_id
-   */
   async autosave(request: FastifyRequest, reply: FastifyReply) {
     const { session_id } = sessionParamsSchema.parse(request.params);
     const body = updateSessionSchema.parse(request.body);
-    const userId = this.extractUserId(request);
-
+    const userId = getCurrentUserId(request);
     const result = await sessionService.autosave(session_id, body, userId);
     return reply.send(result);
   }
 
-  /**
-   * GET /code-sessions/:session_id
-   */
   async getById(request: FastifyRequest, reply: FastifyReply) {
     const { session_id } = sessionParamsSchema.parse(request.params);
     const session = await sessionService.getById(session_id);
@@ -40,6 +32,8 @@ export class SessionController {
       session_id: session.id,
       simulation_id: session.simulationId,
       user_id: session.userId,
+      title: session.title,
+      mode: session.mode,
       language: session.language.name,
       language_version: session.language.version,
       source_code: session.sourceCode,
@@ -51,16 +45,26 @@ export class SessionController {
     });
   }
 
-  /**
-   * Extract user ID from request header.
-   * In production, this would come from JWT/auth middleware.
-   */
-  extractUserId(request: FastifyRequest): string {
-    const userId = request.headers['x-user-id'] as string;
-    if (!userId) {
-      throw new AppError(401, 'Missing x-user-id header', 'UNAUTHORIZED');
-    }
-    return userId;
+  async list(request: FastifyRequest, reply: FastifyReply) {
+    const userId = getCurrentUserId(request);
+    const query = listSessionsQuerySchema.parse(request.query);
+    const result = await sessionService.listByUser(userId, query);
+    return reply.send(result);
+  }
+
+  async delete(request: FastifyRequest, reply: FastifyReply) {
+    const { session_id } = sessionParamsSchema.parse(request.params);
+    const userId = getCurrentUserId(request);
+    const result = await sessionService.delete(session_id, userId);
+    return reply.send(result);
+  }
+
+  async autosaveEndpoint(request: FastifyRequest, reply: FastifyReply) {
+    const { session_id } = sessionParamsSchema.parse(request.params);
+    const body = updateSessionSchema.parse(request.body);
+    const userId = getCurrentUserId(request);
+    const result = await sessionService.autosave(session_id, body, userId);
+    return reply.send(result);
   }
 }
 
