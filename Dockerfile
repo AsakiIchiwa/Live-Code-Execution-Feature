@@ -18,7 +18,7 @@ RUN npm run build
 FROM node:20-slim AS production
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 tini openssl ca-certificates \
+    python3 tini openssl ca-certificates default-jdk-headless g++ \
     && rm -rf /var/lib/apt/lists/*
 RUN groupadd -g 1001 appgroup && useradd -u 1001 -g appgroup -s /bin/sh -m appuser
 
