@@ -95,19 +95,9 @@ export class SandboxService {
    * Java: compile with javac, then run with java.
    */
   private async executeJava(filePath: string, execDir: string, language: LanguageConfig): Promise<SandboxResult> {
-    // Step 1: Compile
-    const compileResult = await this.runProcess('javac', [filePath], {
-      timeoutMs: language.maxTimeoutMs,
-      maxMemoryKb: language.maxMemoryKb,
-      cwd: execDir,
-    });
-    if (compileResult.exitCode !== 0) {
-      return compileResult; // Return compile errors
-    }
-
-    // Step 2: Run — class name is filename without extension
-    const className = filePath.replace(/.*[/\\]/, '').replace('.java', '');
-    return this.runProcess('java', ['-cp', '.', className], {
+    // Java 11+ can run source files directly: java Main.java
+    const fileName = filePath.replace(/.*[/\\]/, '');
+    return this.runProcess('java', [fileName], {
       timeoutMs: language.maxTimeoutMs,
       maxMemoryKb: language.maxMemoryKb,
       cwd: execDir,
