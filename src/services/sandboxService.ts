@@ -107,7 +107,7 @@ export class SandboxService {
 
     // Step 2: Run — class name is filename without extension
     const className = filePath.replace(/.*[/\\]/, '').replace('.java', '');
-    return this.runProcess('java', ['-cp', execDir, className], {
+    return this.runProcess('java', ['-cp', '.', className], {
       timeoutMs: language.maxTimeoutMs,
       maxMemoryKb: language.maxMemoryKb,
       cwd: execDir,
