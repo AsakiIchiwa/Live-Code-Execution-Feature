@@ -136,20 +136,62 @@ async function main() {
     data: { totalLessons: lessons.length },
   });
 
-  // ─── Admin User ───
-  const adminPassword = await bcrypt.hash('admin123', 12);
+  // ─── Demo Users ───
+  const demoPassword = await bcrypt.hash('demo123', 12);
+
   await prisma.user.upsert({
     where: { email: 'admin@edtronaut.ai' },
     update: {},
     create: {
       email: 'admin@edtronaut.ai',
-      passwordHash: adminPassword,
+      passwordHash: demoPassword,
       displayName: 'Admin',
       role: 'ADMIN',
       settings: { create: {} },
     },
   });
-  console.log('Seeded admin user (admin@edtronaut.ai / admin123)');
+
+  await prisma.user.upsert({
+    where: { email: 'creator@edtronaut.ai' },
+    update: {},
+    create: {
+      email: 'creator@edtronaut.ai',
+      passwordHash: demoPassword,
+      displayName: 'Demo Creator',
+      role: 'CREATOR',
+      settings: { create: {} },
+    },
+  });
+
+  await prisma.user.upsert({
+    where: { email: 'user@edtronaut.ai' },
+    update: {},
+    create: {
+      email: 'user@edtronaut.ai',
+      passwordHash: demoPassword,
+      displayName: 'Demo User',
+      role: 'USER',
+      settings: { create: {} },
+    },
+  });
+
+  // Anonymous demo user
+  await prisma.user.upsert({
+    where: { deviceId: 'demo-device-001' },
+    update: {},
+    create: {
+      deviceId: 'demo-device-001',
+      isAnonymous: true,
+      displayName: 'Anonymous Demo',
+      settings: { create: {} },
+    },
+  });
+
+  console.log('Seeded demo users:');
+  console.log('  admin@edtronaut.ai   / demo123 (ADMIN)');
+  console.log('  creator@edtronaut.ai / demo123 (CREATOR)');
+  console.log('  user@edtronaut.ai    / demo123 (USER)');
+  console.log('  device: demo-device-001 (ANONYMOUS)');
 
   console.log('Seeding complete!');
 }
