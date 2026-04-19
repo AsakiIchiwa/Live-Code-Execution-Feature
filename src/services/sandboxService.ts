@@ -53,12 +53,28 @@ export class SandboxService {
     const execDir = join(this.workDir, executionId);
     mkdirSync(execDir, { recursive: true });
 
-    const fileName = `main${language.fileExtension}`;
+    // For Java, filename must match public class name
+    let fileName: string;
+    if (language.name === 'java') {
+      const classMatch = sourceCode.match(/public\s+class\s+(\w+)/);
+      const className = classMatch ? classMatch[1] : 'Main';
+      fileName = `${className}.java`;
+    } else {
+      fileName = `main${language.fileExtension}`;
+    }
     const filePath = join(execDir, fileName);
 
     try {
       // Write source code to temp file
       writeFileSync(filePath, sourceCode, 'utf8');
+
+      if (language.name === 'java') {
+        return await this.executeJava(filePath, execDir, language);
+      }
+
+      if (language.name === 'cpp') {
+        return await this.executeCpp(filePath, execDir, language);
+      }
 
       // Resolve the command based on language
       const { command, args } = this.getCommand(language.name, filePath);
@@ -73,6 +89,52 @@ export class SandboxService {
       // Always cleanup — even on error
       this.cleanup(execDir);
     }
+  }
+
+  /**
+   * Java: compile with javac, then run with java.
+   */
+  private async executeJava(filePath: string, execDir: string, language: LanguageConfig): Promise<SandboxResult> {
+    // Step 1: Compile
+    const compileResult = await this.runProcess('javac', [filePath], {
+      timeoutMs: language.maxTimeoutMs,
+      maxMemoryKb: language.maxMemoryKb,
+      cwd: execDir,
+    });
+    if (compileResult.exitCode !== 0) {
+      return compileResult; // Return compile errors
+    }
+
+    // Step 2: Run — class name is filename without extension
+    const className = filePath.replace(/.*[/\\]/, '').replace('.java', '');
+    return this.runProcess('java', ['-cp', execDir, className], {
+      timeoutMs: language.maxTimeoutMs,
+      maxMemoryKb: language.maxMemoryKb,
+      cwd: execDir,
+    });
+  }
+
+  /**
+   * C++: compile with g++, then run the binary.
+   */
+  private async executeCpp(filePath: string, execDir: string, language: LanguageConfig): Promise<SandboxResult> {
+    const outPath = join(execDir, 'a.out');
+    // Step 1: Compile
+    const compileResult = await this.runProcess('g++', ['-o', outPath, filePath], {
+      timeoutMs: language.maxTimeoutMs,
+      maxMemoryKb: language.maxMemoryKb,
+      cwd: execDir,
+    });
+    if (compileResult.exitCode !== 0) {
+      return compileResult;
+    }
+
+    // Step 2: Run
+    return this.runProcess(outPath, [], {
+      timeoutMs: language.maxTimeoutMs,
+      maxMemoryKb: language.maxMemoryKb,
+      cwd: execDir,
+    });
   }
 
   /**
