@@ -8,3 +8,4 @@ export { lessonPackService, LessonPackService } from './lessonPackService';
 export { submissionService, SubmissionService } from './submissionService';
 export { progressService, ProgressService } from './progressService';
 export { adminService, AdminService } from './adminService';
+export { marketplaceService, MarketplaceService } from './marketplaceService';

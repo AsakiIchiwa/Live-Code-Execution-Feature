@@ -13,6 +13,7 @@ datasource db {
 
 enum UserRole {
   USER
+  CREATOR
   ADMIN
 }
 
@@ -30,13 +31,14 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  settings          UserSettings?
-  sessions          CodeSession[]
-  refreshTokens     RefreshToken[]
-  userLanguagePacks UserLanguagePack[]
-  userLessonPacks   UserLessonPack[]
-  lessonProgress    LessonProgress[]
-  submissions       Submission[]
+  settings               UserSettings?
+  sessions               CodeSession[]
+  refreshTokens          RefreshToken[]
+  userLanguagePacks      UserLanguagePack[]
+  userLessonPacks        UserLessonPack[]
+  lessonProgress         LessonProgress[]
+  submissions            Submission[]
+  marketplaceSubmissions MarketplaceSubmission[]
 
   @@map("users")
 }
@@ -77,23 +79,26 @@ model UserSettings {
 // ─────────────────────────────────────────────
 
 model LanguagePack {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  code              String   @unique @db.VarChar(20)
-  name              String   @db.VarChar(50)
-  description       String   @default("") @db.Text
-  version           String   @default("1.0.0") @db.VarChar(20)
-  iconUrl           String?  @map("icon_url") @db.VarChar(500)
-  size              Int      @default(0) // bytes
-  isBuiltin         Boolean  @default(false) @map("is_builtin")
-  isFree            Boolean  @default(true) @map("is_free")
-  isPublished       Boolean  @default(false) @map("is_published")
-  supportedFeatures Json     @default("[]") @map("supported_features") @db.JsonB
-  manifest          Json     @default("{}") @db.JsonB
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code              String    @unique @db.VarChar(20)
+  name              String    @db.VarChar(50)
+  description       String    @default("") @db.Text
+  version           String    @default("1.0.0") @db.VarChar(20)
+  iconUrl           String?   @map("icon_url") @db.VarChar(500)
+  size              Int       @default(0) // bytes
+  isBuiltin         Boolean   @default(false) @map("is_builtin")
+  isFree            Boolean   @default(true) @map("is_free")
+  isPublished       Boolean   @default(false) @map("is_published")
+  supportedFeatures Json      @default("[]") @map("supported_features") @db.JsonB
+  manifest          Json      @default("{}") @db.JsonB
+  creatorId         String?   @map("creator_id") @db.Uuid
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  userLanguagePacks UserLanguagePack[]
-  lessonPacks       LessonPack[]
+  userLanguagePacks      UserLanguagePack[]
+  lessonPacks            LessonPack[]
+  marketplaceSubmissions MarketplaceSubmission[]
 
   @@map("language_packs")
 }
@@ -138,12 +143,15 @@ model LessonPack {
   manifest       Json       @default("{}") @db.JsonB
   estimatedTime  Int        @default(0) @map("estimated_time") // minutes
   totalLessons   Int        @default(0) @map("total_lessons")
+  creatorId      String?    @map("creator_id") @db.Uuid
+  deletedAt      DateTime?  @map("deleted_at") @db.Timestamptz
   createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
-  languagePack    LanguagePack     @relation(fields: [languagePackId], references: [id])
-  lessons         Lesson[]
-  userLessonPacks UserLessonPack[]
+  languagePack           LanguagePack     @relation(fields: [languagePackId], references: [id])
+  lessons                Lesson[]
+  userLessonPacks        UserLessonPack[]
+  marketplaceSubmissions MarketplaceSubmission[]
 
   @@index([languagePackId], name: "idx_lesson_pack_language")
   @@map("lesson_packs")
@@ -183,6 +191,7 @@ model Lesson {
   estimatedTime   Int        @default(10) @map("estimated_time") // minutes
   orderIndex      Int        @default(0) @map("order_index")
   isPublished     Boolean    @default(false) @map("is_published")
+  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -408,4 +417,50 @@ model ExecutionLog {
 
   @@index([executionId, createdAt], name: "idx_log_execution")
   @@map("execution_logs")
+}
+
+// ─────────────────────────────────────────────
+// MARKETPLACE
+// ─────────────────────────────────────────────
+
+enum MarketplaceStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  PUBLISHED
+  SUSPENDED
+}
+
+enum MarketplaceItemType {
+  LANGUAGE_PACK
+  LESSON_PACK
+}
+
+model MarketplaceSubmission {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  creatorId      String            @map("creator_id") @db.Uuid
+  itemType       MarketplaceItemType @map("item_type")
+  languagePackId String?           @map("language_pack_id") @db.Uuid
+  lessonPackId   String?           @map("lesson_pack_id") @db.Uuid
+  status         MarketplaceStatus @default(DRAFT)
+  title          String            @db.VarChar(200)
+  description    String            @default("") @db.Text
+  version        String            @default("1.0.0") @db.VarChar(20)
+  price          Int               @default(0) // cents, 0 = free
+  reviewNote     String?           @map("review_note") @db.Text
+  reviewedBy     String?           @map("reviewed_by") @db.Uuid
+  reviewedAt     DateTime?         @map("reviewed_at") @db.Timestamptz
+  submittedAt    DateTime?         @map("submitted_at") @db.Timestamptz
+  publishedAt    DateTime?         @map("published_at") @db.Timestamptz
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  creator      User          @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  languagePack LanguagePack? @relation(fields: [languagePackId], references: [id], onDelete: SetNull)
+  lessonPack   LessonPack?   @relation(fields: [lessonPackId], references: [id], onDelete: SetNull)
+
+  @@index([creatorId], name: "idx_marketplace_creator")
+  @@index([status], name: "idx_marketplace_status")
+  @@map("marketplace_submissions")
 }

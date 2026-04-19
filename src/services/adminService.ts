@@ -44,6 +44,15 @@ export class AdminService {
     return prisma.languagePack.update({ where: { id: packId }, data: { isPublished: true } });
   }
 
+  async unpublishLanguagePack(packId: string) {
+    return prisma.languagePack.update({ where: { id: packId }, data: { isPublished: false } });
+  }
+
+  async deleteLanguagePack(packId: string) {
+    // Soft delete
+    return prisma.languagePack.update({ where: { id: packId }, data: { deletedAt: new Date(), isPublished: false } });
+  }
+
   // ─── Lesson Packs ───
   async createLessonPack(input: CreateLessonPackInput) {
     return prisma.lessonPack.create({
@@ -76,12 +85,19 @@ export class AdminService {
   }
 
   async publishLessonPack(packId: string) {
-    // Also update total_lessons count
     const count = await prisma.lesson.count({ where: { lessonPackId: packId, isPublished: true } });
     return prisma.lessonPack.update({
       where: { id: packId },
       data: { isPublished: true, totalLessons: count },
     });
+  }
+
+  async unpublishLessonPack(packId: string) {
+    return prisma.lessonPack.update({ where: { id: packId }, data: { isPublished: false } });
+  }
+
+  async deleteLessonPack(packId: string) {
+    return prisma.lessonPack.update({ where: { id: packId }, data: { deletedAt: new Date(), isPublished: false } });
   }
 
   // ─── Lessons ───
@@ -113,8 +129,11 @@ export class AdminService {
     if (input.lesson_type !== undefined) data.lessonType = input.lesson_type;
     if (input.estimated_time !== undefined) data.estimatedTime = input.estimated_time;
     if (input.order_index !== undefined) data.orderIndex = input.order_index;
-
     return prisma.lesson.update({ where: { id: lessonId }, data });
+  }
+
+  async deleteLesson(lessonId: string) {
+    return prisma.lesson.update({ where: { id: lessonId }, data: { deletedAt: new Date(), isPublished: false } });
   }
 
   // ─── Test Cases ───
@@ -142,6 +161,19 @@ export class AdminService {
     if (input.description !== undefined) data.description = input.description;
 
     return prisma.testCase.update({ where: { id: testCaseId }, data });
+  }
+
+  async deleteTestCase(testCaseId: string) {
+    return prisma.testCase.delete({ where: { id: testCaseId } });
+  }
+
+  // ─── Role Management ───
+  async promoteToCreator(userId: string) {
+    return prisma.user.update({ where: { id: userId }, data: { role: 'CREATOR' as any } });
+  }
+
+  async demoteToUser(userId: string) {
+    return prisma.user.update({ where: { id: userId }, data: { role: 'USER' as any } });
   }
 }
 

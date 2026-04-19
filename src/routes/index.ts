@@ -2,10 +2,10 @@ import { FastifyInstance } from 'fastify';
 import { sessionController } from '../controllers/sessionController';
 import { executionController } from '../controllers/executionController';
 import { executionQueue, redis, prisma } from '../config';
-import { authGuard, adminGuard, getCurrentUserId } from '../middlewares/authGuard';
+import { authGuard, adminGuard, creatorGuard, getCurrentUserId } from '../middlewares/authGuard';
 import {
   authService, userSettingsService, languagePackService,
-  lessonPackService, submissionService, progressService, adminService,
+  lessonPackService, submissionService, progressService, adminService, marketplaceService,
 } from '../services';
 import {
   registerSchema, loginSchema, deviceLoginSchema, updateProfileSchema,
@@ -564,8 +564,179 @@ export async function registerRoutes(app: FastifyInstance) {
     return rep.send(await adminService.updateTestCase(test_case_id, body));
   });
 
+  // Admin: Delete endpoints (soft delete)
+  app.delete('/api/v1/admin/language-packs/:pack_id', {
+    schema: { tags: ['Admin'], description: 'Soft delete language pack' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { pack_id } = packIdParamsSchema.parse(req.params);
+    return rep.send(await adminService.deleteLanguagePack(pack_id));
+  });
+
+  app.delete('/api/v1/admin/lesson-packs/:pack_id', {
+    schema: { tags: ['Admin'], description: 'Soft delete lesson pack' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { pack_id } = packIdParamsSchema.parse(req.params);
+    return rep.send(await adminService.deleteLessonPack(pack_id));
+  });
+
+  app.delete('/api/v1/admin/lessons/:lesson_id', {
+    schema: { tags: ['Admin'], description: 'Soft delete lesson' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { lesson_id } = lessonIdParamsSchema.parse(req.params);
+    return rep.send(await adminService.deleteLesson(lesson_id));
+  });
+
+  app.delete('/api/v1/admin/test-cases/:test_case_id', {
+    schema: { tags: ['Admin'], description: 'Delete test case' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { test_case_id } = testCaseIdParamsSchema.parse(req.params);
+    await adminService.deleteTestCase(test_case_id);
+    return rep.send({ message: 'Deleted' });
+  });
+
+  // Admin: Unpublish endpoints
+  app.post('/api/v1/admin/language-packs/:pack_id/unpublish', {
+    schema: { tags: ['Admin'], description: 'Unpublish language pack' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { pack_id } = packIdParamsSchema.parse(req.params);
+    return rep.send(await adminService.unpublishLanguagePack(pack_id));
+  });
+
+  app.post('/api/v1/admin/lesson-packs/:pack_id/unpublish', {
+    schema: { tags: ['Admin'], description: 'Unpublish lesson pack' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { pack_id } = packIdParamsSchema.parse(req.params);
+    return rep.send(await adminService.unpublishLessonPack(pack_id));
+  });
+
+  // Admin: Role management
+  app.post('/api/v1/admin/users/:user_id/promote-creator', {
+    schema: { tags: ['Admin'], description: 'Promote user to CREATOR role' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { user_id } = (req.params as any);
+    return rep.send(await adminService.promoteToCreator(user_id));
+  });
+
+  app.post('/api/v1/admin/users/:user_id/demote', {
+    schema: { tags: ['Admin'], description: 'Demote user to USER role' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { user_id } = (req.params as any);
+    return rep.send(await adminService.demoteToUser(user_id));
+  });
+
+  // Admin: Marketplace review
+  app.get('/api/v1/admin/marketplace/pending', {
+    schema: { tags: ['Admin'], description: 'List pending marketplace submissions' },
+    preHandler: [authGuard, adminGuard],
+  }, async (_req, rep) => {
+    return rep.send(await marketplaceService.listPendingReviews());
+  });
+
+  app.post('/api/v1/admin/marketplace/:submission_id/approve', {
+    schema: { tags: ['Admin'], description: 'Approve marketplace submission' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { submission_id } = (req.params as any);
+    const adminId = getCurrentUserId(req);
+    return rep.send(await marketplaceService.approve(submission_id, adminId));
+  });
+
+  app.post('/api/v1/admin/marketplace/:submission_id/reject', {
+    schema: { tags: ['Admin'], description: 'Reject marketplace submission' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { submission_id } = (req.params as any);
+    const adminId = getCurrentUserId(req);
+    const { review_note } = (req.body as any) || {};
+    return rep.send(await marketplaceService.reject(submission_id, adminId, review_note || ''));
+  });
+
+  app.post('/api/v1/admin/marketplace/:submission_id/suspend', {
+    schema: { tags: ['Admin'], description: 'Suspend marketplace item' },
+    preHandler: [authGuard, adminGuard],
+  }, async (req, rep) => {
+    const { submission_id } = (req.params as any);
+    const adminId = getCurrentUserId(req);
+    const { review_note } = (req.body as any) || {};
+    return rep.send(await marketplaceService.suspend(submission_id, adminId, review_note || ''));
+  });
+
   // ═══════════════════════════════════════════
-  // XI. SYSTEM / OPS
+  // XII. MARKETPLACE (Creator)
+  // ═══════════════════════════════════════════
+
+  app.post('/api/v1/marketplace/language-packs', {
+    schema: { tags: ['Marketplace'], description: 'Creator: create language pack for marketplace' },
+    preHandler: [authGuard, creatorGuard],
+  }, async (req, rep) => {
+    const creatorId = getCurrentUserId(req);
+    const body = createLanguagePackSchema.parse(req.body);
+    return rep.status(201).send(await marketplaceService.createLanguagePack(creatorId, body));
+  });
+
+  app.post('/api/v1/marketplace/lesson-packs', {
+    schema: { tags: ['Marketplace'], description: 'Creator: create lesson pack for marketplace' },
+    preHandler: [authGuard, creatorGuard],
+  }, async (req, rep) => {
+    const creatorId = getCurrentUserId(req);
+    const body = createLessonPackSchema.parse(req.body);
+    return rep.status(201).send(await marketplaceService.createLessonPack(creatorId, body));
+  });
+
+  app.get('/api/v1/marketplace/my-submissions', {
+    schema: { tags: ['Marketplace'], description: 'Creator: list own submissions' },
+    preHandler: [authGuard, creatorGuard],
+  }, async (req, rep) => {
+    const creatorId = getCurrentUserId(req);
+    return rep.send(await marketplaceService.listMySubmissions(creatorId));
+  });
+
+  app.patch('/api/v1/marketplace/submissions/:submission_id', {
+    schema: { tags: ['Marketplace'], description: 'Creator: update own submission' },
+    preHandler: [authGuard, creatorGuard],
+  }, async (req, rep) => {
+    const creatorId = getCurrentUserId(req);
+    const { submission_id } = (req.params as any);
+    return rep.send(await marketplaceService.updateSubmission(submission_id, creatorId, req.body));
+  });
+
+  app.post('/api/v1/marketplace/submissions/:submission_id/submit', {
+    schema: { tags: ['Marketplace'], description: 'Creator: submit for review' },
+    preHandler: [authGuard, creatorGuard],
+  }, async (req, rep) => {
+    const creatorId = getCurrentUserId(req);
+    const { submission_id } = (req.params as any);
+    return rep.send(await marketplaceService.submitForReview(submission_id, creatorId));
+  });
+
+  // ═══════════════════════════════════════════
+  // XIII. MARKETPLACE (Public)
+  // ═══════════════════════════════════════════
+
+  app.get('/api/v1/marketplace', {
+    schema: { tags: ['Marketplace'], description: 'Browse published marketplace items' },
+  }, async (req, rep) => {
+    const query = req.query as any;
+    return rep.send(await marketplaceService.browse(query));
+  });
+
+  app.get('/api/v1/marketplace/:submission_id', {
+    schema: { tags: ['Marketplace'], description: 'Get marketplace item detail' },
+  }, async (req, rep) => {
+    const { submission_id } = (req.params as any);
+    return rep.send(await marketplaceService.getItem(submission_id));
+  });
+
+  // ═══════════════════════════════════════════
+  // XIV. SYSTEM / OPS
   // ═══════════════════════════════════════════
 
   app.get('/api/v1/system/status', {

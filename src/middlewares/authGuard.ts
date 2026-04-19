@@ -42,6 +42,15 @@ export async function adminGuard(request: FastifyRequest, _reply: FastifyReply) 
 }
 
 /**
+ * Creator-or-admin middleware — must be used after authGuard.
+ */
+export async function creatorGuard(request: FastifyRequest, _reply: FastifyReply) {
+  if (!request.currentUser || (request.currentUser.role !== 'CREATOR' && request.currentUser.role !== 'ADMIN')) {
+    throw new AppError(403, 'Creator or Admin access required', 'FORBIDDEN');
+  }
+}
+
+/**
  * Extract current user ID from JWT. Throws if not authenticated.
  */
 export function getCurrentUserId(request: FastifyRequest): string {

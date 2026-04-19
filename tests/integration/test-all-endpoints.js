@@ -154,8 +154,54 @@ async function run() {
 
   ok('Publish lesson pack', await req('POST', `/api/v1/admin/lesson-packs/${newLessonPackId}/publish`, {}, AT));
 
+  // Unpublish
+  ok('Unpublish lang pack', await req('POST', `/api/v1/admin/language-packs/${newLpId}/unpublish`, {}, AT));
+  ok('Unpublish lesson pack', await req('POST', `/api/v1/admin/lesson-packs/${newLessonPackId}/unpublish`, {}, AT));
+
+  // Delete test case
+  if (tcId) ok('Delete test case', await req('DELETE', `/api/v1/admin/test-cases/${tcId}`, null, AT));
+
+  // Soft delete
+  ok('Delete lesson', await req('DELETE', `/api/v1/admin/lessons/${newLessonId}`, null, AT));
+  ok('Delete lesson pack', await req('DELETE', `/api/v1/admin/lesson-packs/${newLessonPackId}`, null, AT));
+  ok('Delete lang pack', await req('DELETE', `/api/v1/admin/language-packs/${newLpId}`, null, AT));
+
+  // Role management: promote test user to CREATOR
+  const meRes = await req('GET', '/api/v1/auth/me', null, T);
+  const testUserId = meRes.d.id || meRes.d.user?.id;
+  ok('Promote to creator', await req('POST', `/api/v1/admin/users/${testUserId}/promote-creator`, {}, AT));
+
+  console.log('\n=== MARKETPLACE (Creator) ===');
+  // Now test user is CREATOR, re-login to get new token with CREATOR role
+  r = ok('Creator login', await req('POST', '/api/v1/auth/login', { email, password: 'pass1234' }));
+  const CT = r.d.access_token;
+
+  const mktCode = 'mkt' + Date.now();
+  r = ok('Creator: create lang pack', await req('POST', '/api/v1/marketplace/language-packs', { code: mktCode, name: 'My Lang', description: 'Creator pack', is_free: true }, CT), 201);
+
+  r = ok('Creator: my submissions', await req('GET', '/api/v1/marketplace/my-submissions', null, CT));
+  const mktSubId = r.d[0]?.id;
+
+  if (mktSubId) {
+    ok('Creator: update submission', await req('PATCH', `/api/v1/marketplace/submissions/${mktSubId}`, { description: 'Updated desc' }, CT));
+    ok('Creator: submit for review', await req('POST', `/api/v1/marketplace/submissions/${mktSubId}/submit`, {}, CT));
+
+    console.log('\n=== MARKETPLACE (Admin Review) ===');
+    r = ok('Admin: pending reviews', await req('GET', '/api/v1/admin/marketplace/pending', null, AT));
+    ok('Admin: approve', await req('POST', `/api/v1/admin/marketplace/${mktSubId}/approve`, {}, AT));
+  }
+
+  console.log('\n=== MARKETPLACE (Public) ===');
+  ok('Browse marketplace', await req('GET', '/api/v1/marketplace'));
+  if (mktSubId) ok('Get marketplace item', await req('GET', `/api/v1/marketplace/${mktSubId}`));
+
+  // Demote back
+  ok('Demote to user', await req('POST', `/api/v1/admin/users/${testUserId}/demote`, {}, AT));
+
   // Non-admin should fail
   ok('Admin guard', await req('POST', '/api/v1/admin/language-packs', { code: 'x', name: 'x' }, T), 403);
+  // Non-creator should fail
+  ok('Creator guard', await req('POST', '/api/v1/marketplace/language-packs', { code: 'x', name: 'x' }, T), 403);
 
   console.log('\n=== LOGOUT ===');
   ok('Logout', await req('POST', '/api/v1/auth/logout', {}, T));
