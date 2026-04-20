@@ -16,6 +16,19 @@ export const deviceLoginSchema = z.object({
   device_id: z.string().min(1).max(255),
 });
 
+export const googleLoginSchema = z.object({
+  id_token: z.string().min(1),
+});
+
+export const githubLoginSchema = z.object({
+  code: z.string().min(1),
+  redirect_uri: z.string().min(1).optional(),
+});
+
+export const facebookLoginSchema = z.object({
+  access_token: z.string().min(1),
+});
+
 export const updateProfileSchema = z.object({
   display_name: z.string().min(1).max(100).optional(),
   avatar_url: z.string().url().max(500).optional(),
@@ -162,6 +175,9 @@ export const updateTestCaseSchema = createTestCaseSchema.partial();
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type DeviceLoginInput = z.infer<typeof deviceLoginSchema>;
+export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
+export type GithubLoginInput = z.infer<typeof githubLoginSchema>;
+export type FacebookLoginInput = z.infer<typeof facebookLoginSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;

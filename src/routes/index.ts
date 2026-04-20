@@ -8,7 +8,8 @@ import {
   lessonPackService, submissionService, progressService, adminService, marketplaceService,
 } from '../services';
 import {
-  registerSchema, loginSchema, deviceLoginSchema, updateProfileSchema,
+  registerSchema, loginSchema, deviceLoginSchema, googleLoginSchema,
+  githubLoginSchema, facebookLoginSchema, updateProfileSchema,
   updateSettingsSchema, packIdParamsSchema, lessonIdParamsSchema,
   submissionIdParamsSchema, testCaseIdParamsSchema, submitLessonSchema,
   listLessonPacksQuerySchema, createLanguagePackSchema, updateLanguagePackSchema,
@@ -76,6 +77,30 @@ export async function registerRoutes(app: FastifyInstance) {
   }, async (req, rep) => {
     const body = deviceLoginSchema.parse(req.body);
     const result = await authService.deviceLogin(body);
+    return rep.send(result);
+  });
+
+  app.post('/api/v1/auth/google-login', {
+    schema: { tags: ['Auth'], description: 'Login with Google ID token' },
+  }, async (req, rep) => {
+    const body = googleLoginSchema.parse(req.body);
+    const result = await authService.googleLogin(body);
+    return rep.send(result);
+  });
+
+  app.post('/api/v1/auth/github-login', {
+    schema: { tags: ['Auth'], description: 'Login with GitHub OAuth code' },
+  }, async (req, rep) => {
+    const body = githubLoginSchema.parse(req.body);
+    const result = await authService.githubLogin(body);
+    return rep.send(result);
+  });
+
+  app.post('/api/v1/auth/facebook-login', {
+    schema: { tags: ['Auth'], description: 'Login with Facebook access token' },
+  }, async (req, rep) => {
+    const body = facebookLoginSchema.parse(req.body);
+    const result = await authService.facebookLogin(body);
     return rep.send(result);
   });
 

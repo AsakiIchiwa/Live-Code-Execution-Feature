@@ -27,6 +27,8 @@ model User {
   isAnonymous   Boolean  @default(false) @map("is_anonymous")
   deviceId      String?  @unique @map("device_id") @db.VarChar(255)
   googleId      String?  @unique @map("google_id") @db.VarChar(255)
+  githubId      String?  @unique @map("github_id") @db.VarChar(255)
+  facebookId    String?  @unique @map("facebook_id") @db.VarChar(255)
   lastLoginAt   DateTime? @map("last_login_at") @db.Timestamptz
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz

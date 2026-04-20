@@ -19,6 +19,23 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN_DAYS: z.coerce.number().default(30),
 
+  // Google OAuth — Web-type client ID from Google Cloud Console.
+  // Required for /auth/google-login; leave empty to disable the endpoint.
+  GOOGLE_CLIENT_ID: z.string().optional(),
+
+  // GitHub OAuth — from https://github.com/settings/developers.
+  // Required for /auth/github-login; leave empty to disable the endpoint.
+  GITHUB_CLIENT_ID: z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
+  // Must match the OAuth app's callback URL. For mobile deep-link flow,
+  // typically `codelab://oauth/github`.
+  GITHUB_REDIRECT_URI: z.string().optional(),
+
+  // Facebook Login — from https://developers.facebook.com/apps.
+  // Required for /auth/facebook-login; leave empty to disable the endpoint.
+  FACEBOOK_APP_ID: z.string().optional(),
+  FACEBOOK_APP_SECRET: z.string().optional(),
+
   EXEC_TIMEOUT_MS: z.coerce.number().default(10000),
   EXEC_MAX_MEMORY_KB: z.coerce.number().default(262144),
   EXEC_MAX_OUTPUT_BYTES: z.coerce.number().default(1048576),
