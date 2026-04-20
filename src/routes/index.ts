@@ -116,7 +116,7 @@ export async function registerRoutes(app: FastifyInstance) {
   app.post('/api/v1/auth/logout', {
     schema: { tags: ['Auth'], description: 'Logout (revoke refresh token)' },
   }, async (req, rep) => {
-    const { refresh_token } = req.body as any;
+    const { refresh_token } = (req.body || {}) as any;
     if (refresh_token) await authService.logout(refresh_token);
     return rep.send({ message: 'Logged out' });
   });
