@@ -10,6 +10,44 @@ import { config, prisma, redis } from './config';
 import { registerRoutes } from './routes';
 import { errorHandler } from './middlewares/errorHandler';
 
+async function repairLegacyCodeSessionUsers() {
+  const recovered = await prisma.$executeRawUnsafe(`
+    INSERT INTO users (id, display_name, is_anonymous, created_at, updated_at)
+    SELECT DISTINCT cs.user_id, 'Recovered User', TRUE, NOW(), NOW()
+    FROM code_sessions cs
+    LEFT JOIN users u ON u.id = cs.user_id
+    WHERE u.id IS NULL
+  `);
+
+  if (Number(recovered) > 0) {
+    console.log(`Recovered ${recovered} missing user records before schema sync`);
+  }
+}
+
+async function syncDatabaseSchema() {
+  const command = 'npx prisma db push --accept-data-loss';
+
+  try {
+    console.log('Running database migrations...');
+    execSync(command, { stdio: 'inherit', cwd: process.cwd() });
+    console.log('Database schema synced successfully');
+    return;
+  } catch (error: any) {
+    const errorText = [error?.stderr, error?.stdout, error?.message].filter(Boolean).join('\n');
+
+    if (/code_sessions_user_id_fkey/.test(errorText)) {
+      console.warn('Legacy code_sessions rows detected; repairing missing users and retrying schema sync...');
+      await prisma.$connect();
+      await repairLegacyCodeSessionUsers();
+      execSync(command, { stdio: 'inherit', cwd: process.cwd() });
+      console.log('Database schema synced successfully after repair');
+      return;
+    }
+
+    throw error;
+  }
+}
+
 async function buildApp() {
   const app = Fastify({
     logger: {
@@ -104,9 +142,7 @@ async function start() {
   try {
     // Run migrations before anything else
     try {
-      console.log('Running database migrations...');
-      execSync('npx prisma db push --accept-data-loss', { stdio: 'inherit', cwd: process.cwd() });
-      console.log('Database schema synced successfully');
+      await syncDatabaseSchema();
     } catch (migrationErr) {
       console.error('Migration failed:', migrationErr);
       // Don't exit — maybe tables already exist
