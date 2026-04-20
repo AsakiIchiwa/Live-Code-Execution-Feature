@@ -38,6 +38,25 @@ function runDbPush() {
   });
 }
 
+async function runSeed() {
+  // Only seed if demo users don't exist yet
+  const admin = await prisma.user.findUnique({ where: { email: 'admin@edtronaut.ai' } });
+  if (admin) {
+    console.log('Seed data already present, skipping seed');
+    return;
+  }
+  console.log('Running database seed...');
+  try {
+    execSync('npx prisma db seed', {
+      stdio: 'inherit',
+      cwd: process.cwd(),
+    });
+    console.log('Database seeded successfully');
+  } catch (err) {
+    console.warn('Seed failed (non-fatal):', err);
+  }
+}
+
 async function syncDatabaseSchema() {
   console.log('Running database migrations...');
 
@@ -168,6 +187,14 @@ async function start() {
     } catch (migrationErr) {
       console.error('Migration failed:', migrationErr);
       // Don't exit — maybe tables already exist
+    }
+
+    // Seed demo data if not present
+    try {
+      await prisma.$connect();
+      await runSeed();
+    } catch (seedErr) {
+      console.warn('Seed check failed (non-fatal):', seedErr);
     }
 
     const app = await buildApp();
