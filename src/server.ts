@@ -11,35 +11,57 @@ import { registerRoutes } from './routes';
 import { errorHandler } from './middlewares/errorHandler';
 
 async function repairLegacyCodeSessionUsers() {
-  const recovered = await prisma.$executeRawUnsafe(`
-    INSERT INTO users (id, display_name, is_anonymous, created_at, updated_at)
-    SELECT DISTINCT cs.user_id, 'Recovered User', TRUE, NOW(), NOW()
-    FROM code_sessions cs
-    LEFT JOIN users u ON u.id = cs.user_id
-    WHERE u.id IS NULL
-  `);
+  try {
+    const recovered = await prisma.$executeRawUnsafe(`
+      INSERT INTO users (id, display_name, is_anonymous, created_at, updated_at)
+      SELECT DISTINCT cs.user_id, 'Recovered User', TRUE, NOW(), NOW()
+      FROM code_sessions cs
+      LEFT JOIN users u ON u.id = cs.user_id
+      WHERE u.id IS NULL
+    `);
 
-  if (Number(recovered) > 0) {
-    console.log(`Recovered ${recovered} missing user records before schema sync`);
+    if (Number(recovered) > 0) {
+      console.log(`Recovered ${recovered} missing user records before schema sync`);
+    }
+  } catch (err: any) {
+    // Fresh DB: code_sessions / users tables may not exist yet. Safe to skip.
+    if (/does not exist/i.test(String(err?.message ?? err))) return;
+    throw err;
   }
 }
 
+function runDbPush() {
+  // Capture stderr so we can match it; still forward to parent console.
+  execSync('npx prisma db push --accept-data-loss', {
+    stdio: ['ignore', 'inherit', 'pipe'],
+    cwd: process.cwd(),
+  });
+}
+
 async function syncDatabaseSchema() {
-  const command = 'npx prisma db push --accept-data-loss';
+  console.log('Running database migrations...');
+
+  // Proactively repair orphaned code_sessions rows BEFORE db push, so the FK
+  // revalidation step in `prisma db push` never sees dangling user_ids.
+  try {
+    await prisma.$connect();
+    await repairLegacyCodeSessionUsers();
+  } catch (err) {
+    console.warn('Pre-sync repair skipped:', err);
+  }
 
   try {
-    console.log('Running database migrations...');
-    execSync(command, { stdio: 'inherit', cwd: process.cwd() });
+    runDbPush();
     console.log('Database schema synced successfully');
-    return;
   } catch (error: any) {
-    const errorText = [error?.stderr, error?.stdout, error?.message].filter(Boolean).join('\n');
+    const stderr = error?.stderr ? String(error.stderr) : '';
+    if (stderr) process.stderr.write(stderr);
 
+    const errorText = [stderr, error?.stdout, error?.message].filter(Boolean).join('\n');
     if (/code_sessions_user_id_fkey/.test(errorText)) {
-      console.warn('Legacy code_sessions rows detected; repairing missing users and retrying schema sync...');
-      await prisma.$connect();
+      console.warn('FK violation after repair; running repair once more and retrying...');
       await repairLegacyCodeSessionUsers();
-      execSync(command, { stdio: 'inherit', cwd: process.cwd() });
+      runDbPush();
       console.log('Database schema synced successfully after repair');
       return;
     }
